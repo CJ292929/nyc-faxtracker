@@ -22,6 +22,20 @@ export const mdSuggestions = (documents: Document[], patient?: Patient | null) =
 export const titleOf = (d: Document) => `${d.document_type}${d.document_number ? ` #${d.document_number}` : ''}`;
 export const dateOf = (date?: string | null) => date ? new Date(date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
 export const dateTimeOf = (date?: string | null) => date ? new Date(date).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}) : '—';
+const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// For calendar-date-only columns (documents.document_date, patients.date_of_birth):
+// parses the "YYYY-MM-DD" string directly instead of going through `new
+// Date(dateString)`, which JS parses as UTC midnight and then
+// toLocaleDateString renders in the viewer's local zone -- rolling the
+// displayed day back by one in any zone behind UTC. No Date object is
+// constructed here, so there is no timezone to shift across.
+export const dateOnlyOf = (date?: string | null) => {
+  if (!date) return '—';
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(date);
+  if (!m) return dateOf(date);
+  const [, y, mo, d] = m as unknown as [string, string, string, string];
+  return `${MONTH_ABBR[Number(mo) - 1]} ${Number(d)}, ${y}`;
+};
 export const statusOf = (d: Document, attempts: Attempt[]) => {
   if (d.uploaded) return 'Uploaded';
   if (d.received) return 'Awaiting Upload';

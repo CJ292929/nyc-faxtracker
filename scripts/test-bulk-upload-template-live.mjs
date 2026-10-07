@@ -140,7 +140,17 @@ async function main() {
     check(
       "downloaded template header row matches the expected columns",
       JSON.stringify(headerRow) ===
-        JSON.stringify(["Name", "Member ID", "DOB", "Phone", "Insurance", "Referring MD"]),
+        JSON.stringify([
+          "Name",
+          "Member ID",
+          "DOB",
+          "Patient Phone",
+          "Insurance",
+          "Referring Provider",
+          "Referring Provider NPI",
+          "Referring Provider Office Number",
+          "Referring Provider Fax Number",
+        ]),
     );
 
     const rows = [
