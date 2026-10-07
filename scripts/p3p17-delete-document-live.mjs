@@ -33,7 +33,13 @@ const env = Object.fromEntries(
     .filter((l) => l.includes("="))
     .map((l) => {
       const i = l.indexOf("=");
-      return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^"(.*)"$/, "$1")];
+      return [
+        l.slice(0, i).trim(),
+        l
+          .slice(i + 1)
+          .trim()
+          .replace(/^"(.*)"$/, "$1"),
+      ];
     }),
 );
 
@@ -86,11 +92,13 @@ async function runSqlChecks() {
       await asUser(adminId);
       await tx`select * from public.correct_fax_attempt(
         ${attemptAId}, (select updated_at from public.fax_attempts where id = ${attemptAId}), now(),
-        'Sent Successfully', null, 'REF-A', null, 'synthetic setup correction A'
+        'Sent Successfully', null, 'REF-A', null, 'synthetic setup correction A',
+        'Dr. Same', 'Insurance', 'Same Recipient', null, null, null, null
       )`;
       await tx`select * from public.correct_fax_attempt(
         ${attemptBId}, (select updated_at from public.fax_attempts where id = ${attemptBId}), now(),
-        'Sent Successfully', null, 'REF-B', null, 'synthetic setup correction B'
+        'Sent Successfully', null, 'REF-B', null, 'synthetic setup correction B',
+        'Dr. Same', 'Insurance', 'Same Recipient', null, null, null, null
       )`;
 
       let spCounter = 0;
@@ -161,8 +169,7 @@ async function runSqlChecks() {
       check("T3 patient still exists", !!patientStill);
       const [docBStill] = await tx`select id from public.documents where id = ${docBId}`;
       check("T3 document B still exists", !!docBStill);
-      const [attemptBStill] =
-        await tx`select id from public.fax_attempts where id = ${attemptBId}`;
+      const [attemptBStill] = await tx`select id from public.fax_attempts where id = ${attemptBId}`;
       check("T3 document B's fax attempt still exists", !!attemptBStill);
       const [correctionBStill] =
         await tx`select id from public.fax_attempt_corrections where attempt_id = ${attemptBId}`;
@@ -266,7 +273,11 @@ async function runStorageChecks() {
   check("Storage: simulated cleanup failure is a real API error", !!failedRemoval.error);
   await admin
     .from("patient_file_cleanup_queue")
-    .update({ attempts: 1, last_error: failedRemoval.error?.message, last_attempted_at: new Date().toISOString() })
+    .update({
+      attempts: 1,
+      last_error: failedRemoval.error?.message,
+      last_attempted_at: new Date().toISOString(),
+    })
     .eq("patient_ref", patientRef)
     .in("storage_path", [pathA])
     .is("done_at", null);
