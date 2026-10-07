@@ -5,6 +5,22 @@ export const TEMPLATE_HEADERS = [
   "DOB",
   "Patient Phone",
   "Insurance",
+  "Referring Provider",
+  "Referring Provider NPI",
+  "Referring Provider Office Number",
+  "Referring Provider Fax Number",
+] as const;
+// The nine-column template downloaded between P3-P15 and P3-P16 (before the
+// "Referring MD" -> "Referring Provider" label rename in P3-P17). Still
+// accepted on upload with identical column positions/semantics to the
+// current template -- only the header wording changed, not the data this
+// template collects, so these rows parse exactly like `current`.
+export const LEGACY_MD_TEMPLATE_HEADERS = [
+  "Name",
+  "Member ID",
+  "DOB",
+  "Patient Phone",
+  "Insurance",
   "Referring MD",
   "Referring MD NPI",
   "Referring MD Office Number",
@@ -12,7 +28,7 @@ export const TEMPLATE_HEADERS = [
 ] as const;
 // The six-column template downloaded before P3-P15 shipped. Still accepted
 // on upload: its "Phone" column is treated as Patient Phone, and the three
-// new Referring MD contact columns are left empty for every row -- never
+// Referring Provider contact columns are left empty for every row -- never
 // invented. Any other header shape is rejected with a clear error.
 export const LEGACY_TEMPLATE_HEADERS = [
   "Name",
@@ -76,19 +92,29 @@ function headersMatch(found: string[], expected: readonly string[]): boolean {
 }
 
 /**
- * Detects which of the two explicitly supported template shapes a header
- * row matches: the current nine-column template, or the legacy six-column
- * one. Returns null (with errors describing the mismatch) for anything
- * else -- malformed headers are rejected clearly rather than guessed at.
+ * Detects which of the three explicitly supported template shapes a header
+ * row matches: the current nine-column template ("Referring Provider..."),
+ * the nine-column "Referring MD..." template downloaded before the P3-P17
+ * label rename (parses identically to current), or the oldest legacy
+ * six-column template. Returns null (with errors describing the mismatch)
+ * for anything else -- malformed headers are rejected clearly rather than
+ * guessed at.
  */
 export function detectTemplate(
   headerRow: unknown[],
-): { kind: "current" | "legacy"; errors: [] } | { kind: null; errors: string[] } {
+): { kind: "current" | "legacy_md9" | "legacy"; errors: [] } | { kind: null; errors: string[] } {
   const filledCount = countFilled(headerRow);
   const asCurrent = TEMPLATE_HEADERS.map((_, i) => cell(headerRow, i));
+  const asLegacyMd9 = LEGACY_MD_TEMPLATE_HEADERS.map((_, i) => cell(headerRow, i));
   const asLegacy = LEGACY_TEMPLATE_HEADERS.map((_, i) => cell(headerRow, i));
   if (filledCount === TEMPLATE_HEADERS.length && headersMatch(asCurrent, TEMPLATE_HEADERS)) {
     return { kind: "current", errors: [] };
+  }
+  if (
+    filledCount === LEGACY_MD_TEMPLATE_HEADERS.length &&
+    headersMatch(asLegacyMd9, LEGACY_MD_TEMPLATE_HEADERS)
+  ) {
+    return { kind: "legacy_md9", errors: [] };
   }
   if (filledCount === LEGACY_TEMPLATE_HEADERS.length && headersMatch(asLegacy, LEGACY_TEMPLATE_HEADERS)) {
     return { kind: "legacy", errors: [] };
@@ -103,9 +129,21 @@ export function detectTemplate(
     return { kind: null, errors };
   }
   if (filledCount === TEMPLATE_HEADERS.length) {
-    TEMPLATE_HEADERS.forEach((expected, i) => {
-      if ((asCurrent[i] ?? "").toLowerCase() !== expected.toLowerCase()) {
-        errors.push(`Column ${i + 1} must be "${expected}" (found "${asCurrent[i] ?? ""}").`);
+    // Both nine-column shapes have the same length; prefer reporting
+    // against whichever one has more matching columns so the error
+    // message points at the closer mismatch.
+    const currentMatches = TEMPLATE_HEADERS.filter(
+      (expected, i) => (asCurrent[i] ?? "").toLowerCase() === expected.toLowerCase(),
+    ).length;
+    const legacyMd9Matches = LEGACY_MD_TEMPLATE_HEADERS.filter(
+      (expected, i) => (asLegacyMd9[i] ?? "").toLowerCase() === expected.toLowerCase(),
+    ).length;
+    const useLegacyMd9 = legacyMd9Matches > currentMatches;
+    const expectedHeaders = useLegacyMd9 ? LEGACY_MD_TEMPLATE_HEADERS : TEMPLATE_HEADERS;
+    const found = useLegacyMd9 ? asLegacyMd9 : asCurrent;
+    expectedHeaders.forEach((expected, i) => {
+      if ((found[i] ?? "").toLowerCase() !== expected.toLowerCase()) {
+        errors.push(`Column ${i + 1} must be "${expected}" (found "${found[i] ?? ""}").`);
       }
     });
     return { kind: null, errors };
@@ -185,6 +223,10 @@ export function parseRows(aoa: unknown[][]): ParseResult {
   const header = aoa[0] ?? [];
   const detected = detectTemplate(header);
   if (detected.kind === null) return { fileErrors: detected.errors, rows: [] };
+  // Only the oldest six-column template lacks NPI/Office/Fax columns
+  // entirely; the "legacy_md9" shape (old "Referring MD..." headers) has
+  // all nine columns in the same positions as `current` and parses
+  // identically.
   const isLegacy = detected.kind === "legacy";
   const dataRows = aoa
     .slice(1)
@@ -221,12 +263,12 @@ export function parseRows(aoa: unknown[][]): ParseResult {
     if (insurance.length > MAX_LEN.insurance)
       errors.push(`Insurance exceeds ${MAX_LEN.insurance} characters.`);
     if (referring.length > MAX_LEN.referring)
-      errors.push(`Referring MD exceeds ${MAX_LEN.referring} characters.`);
+      errors.push(`Referring Provider exceeds ${MAX_LEN.referring} characters.`);
     if (npi && !/^\d{10}$/.test(npi))
-      errors.push(`Referring MD NPI "${npi}" must be exactly 10 digits.`);
+      errors.push(`Referring Provider NPI "${npi}" must be exactly 10 digits.`);
     if (officePhone.length > MAX_LEN.office_phone)
-      errors.push(`Referring MD Office Number exceeds ${MAX_LEN.office_phone} characters.`);
-    if (fax.length > MAX_LEN.fax) errors.push(`Referring MD Fax Number exceeds ${MAX_LEN.fax} characters.`);
+      errors.push(`Referring Provider Office Number exceeds ${MAX_LEN.office_phone} characters.`);
+    if (fax.length > MAX_LEN.fax) errors.push(`Referring Provider Fax Number exceeds ${MAX_LEN.fax} characters.`);
     const { iso: dob, error: dobError } = parseDob(dobRaw);
     if (dobError) errors.push(dobError);
     return {

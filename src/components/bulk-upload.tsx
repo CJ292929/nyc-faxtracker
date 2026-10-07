@@ -270,10 +270,10 @@ export function BulkUploadModal({ onClose }: { onClose: () => void }) {
                   <th>DOB</th>
                   <th>Patient Phone</th>
                   <th>Insurance</th>
-                  <th>Referring MD</th>
-                  <th>Referring MD NPI</th>
-                  <th>Referring MD Office Number</th>
-                  <th>Referring MD Fax Number</th>
+                  <th>Referring Provider</th>
+                  <th>Referring Provider NPI</th>
+                  <th>Referring Provider Office Number</th>
+                  <th>Referring Provider Fax Number</th>
                   <th>Flags</th>
                 </tr>
               </thead>

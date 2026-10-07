@@ -490,6 +490,18 @@ export type Database = {
           updated_at: string
         }[]
       }
+      delete_document: {
+        Args: {
+          _document_id: string
+        }
+        Returns: {
+          attempts_deleted: number
+          document_id: string
+          files_deleted: number
+          patient_id: string
+          storage_paths: string[] | null
+        }[]
+      }
       delete_patient_permanently: {
         Args: {
           _expected_patient_code: string

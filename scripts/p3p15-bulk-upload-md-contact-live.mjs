@@ -200,27 +200,29 @@ async function main() {
           "DOB",
           "Patient Phone",
           "Insurance",
-          "Referring MD",
-          "Referring MD NPI",
-          "Referring MD Office Number",
-          "Referring MD Fax Number",
+          "Referring Provider",
+          "Referring Provider NPI",
+          "Referring Provider Office Number",
+          "Referring Provider Fax Number",
         ]),
     );
     const npiCellRef = XLSX.utils.encode_cell({ r: 1, c: 6 });
     const npiCell = sheet[npiCellRef];
     check(
-      "Referring MD NPI column is formatted as text (preserves leading zeros)",
+      "Referring Provider NPI column is formatted as text (preserves leading zeros)",
       npiCell?.t === "s" && npiCell?.z === "@",
     );
     const officeCellRef = XLSX.utils.encode_cell({ r: 1, c: 7 });
     check(
-      "Referring MD Office Number column is formatted as text",
+      "Referring Provider Office Number column is formatted as text",
       sheet[officeCellRef]?.z === "@",
     );
     const faxCellRef = XLSX.utils.encode_cell({ r: 1, c: 8 });
-    check("Referring MD Fax Number column is formatted as text", sheet[faxCellRef]?.z === "@");
+    check("Referring Provider Fax Number column is formatted as text", sheet[faxCellRef]?.z === "@");
 
-    // ---- upload the current nine-column template (valid + invalid NPI) ----
+    // ---- upload the nine-column "Referring MD" template (pre-P3-P17
+    // header wording; still accepted as the legacy_md9 shape, parses
+    // identically to the current "Referring Provider" template) ----
     await page.getByRole("button", { name: "Bulk Upload Patients" }).click();
     await page.waitForSelector("text=Bulk Upload Patients");
     await page.locator('input[type="file"]').setInputFiles(currentUploadPath);

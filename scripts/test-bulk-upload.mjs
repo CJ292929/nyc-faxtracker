@@ -5,6 +5,7 @@
 //   node --experimental-strip-types scripts/test-bulk-upload.mjs
 import {
   TEMPLATE_HEADERS,
+  LEGACY_MD_TEMPLATE_HEADERS,
   LEGACY_TEMPLATE_HEADERS,
   validateHeaders,
   parseDob,
@@ -110,6 +111,33 @@ ok(
 );
 const blankNpi = parseRows([headerRow, ["Blank Npi", "M1", "", "", "", "", "", "", ""]]);
 ok("blank NPI is not an error", blankNpi.rows[0].errors.length === 0);
+
+// --- Legacy nine-column "Referring MD" template (pre-P3-P17 header
+// wording) -- parses identically to the current "Referring Provider"
+// template, nothing left blank. ---
+const legacyMd9HeaderRow = [...LEGACY_MD_TEMPLATE_HEADERS];
+const legacyMd9 = parseRows([
+  legacyMd9HeaderRow,
+  [
+    "Old Header Patient",
+    "M400",
+    "03/14/1980",
+    "555-4321",
+    "Medicare",
+    "Dr. Lee",
+    "1234567893",
+    "555-0100 ext. 2",
+    "555-555-0199",
+  ],
+]);
+ok("legacy nine-column \"Referring MD\" header is accepted", legacyMd9.fileErrors.length === 0);
+check("legacy_md9 NPI carried through", legacyMd9.rows[0].referring_physician_npi, "1234567893");
+check(
+  "legacy_md9 office number carried through",
+  legacyMd9.rows[0].referring_physician_office_phone,
+  "555-0100 ext. 2",
+);
+check("legacy_md9 fax carried through", legacyMd9.rows[0].referring_physician_fax, "555-555-0199");
 
 // --- Legacy six-column template ---
 const legacyHeaderRow = [...LEGACY_TEMPLATE_HEADERS];
