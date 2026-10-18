@@ -53,13 +53,15 @@ const ADM = id(3); // admin
 const NOROLE = id(4); // signed in, no role
 const GONE = id(5); // staff later deleted
 
-async function part1(sql) {
+async function part1(sql, owner) {
   await sql
     .begin(async (tx) => {
       let sp = 0;
       // Run a query as `uid` through the authenticated role (RLS applies).
       // null = anon. Each call is isolated in a savepoint so an expected
-      // rejection does not abort the surrounding transaction.
+      // rejection does not abort the surrounding transaction. Switches back
+      // to the migration role explicitly (not RESET ROLE, which would drop
+      // an assumed SUPABASE_DB_MIGRATION_ROLE).
       async function as(uid, run) {
         const name = `sp_${sp++}`;
         await tx.unsafe(`savepoint ${name}`);
@@ -67,7 +69,7 @@ async function part1(sql) {
           await tx.unsafe(uid ? "set local role authenticated" : "set local role anon");
           await tx`select set_config('request.jwt.claims', ${uid ? JSON.stringify({ sub: uid, role: "authenticated" }) : ""}, true)`;
           const rows = await run();
-          await tx.unsafe("reset role");
+          await tx.unsafe(`set local role "${owner}"`);
           await tx.unsafe(`release savepoint ${name}`);
           return rows;
         } catch (e) {
@@ -252,7 +254,7 @@ async function part1(sql) {
       await as(
         A,
         () =>
-          tx`select * from public.correct_fax_attempt(${a1.id}, ${a1.updated_at}, ${a1.attempted_at}, 'Sent Successfully', null, 'R9', null, 'wrong status', null, null, null, null, null, null, null)`,
+          tx`select * from public.correct_fax_attempt(${a1.id}, (select updated_at from public.fax_attempts where id = ${a1.id}), ${a1.attempted_at}, 'Sent Successfully', null, 'R9', null, 'wrong status', null, null, null, null, null, null, null)`,
       );
       ev =
         await tx`select action, changes from public.audit_logs where document_id = ${d.id} order by created_at, id`;
@@ -554,10 +556,14 @@ async function part2(sql) {
 
 const sql = postgres(env.SUPABASE_DB_MIGRATION_URL, { max: 1, onnotice: () => {} });
 try {
-  const [{ current_database, ref }] =
-    await sql`select current_database(), current_setting('cluster_name', true) as ref`;
-  console.log(`connected: db=${current_database}${ref ? ` cluster=${ref}` : ""}`);
-  await part1(sql);
+  // Optional: when connecting through a short-lived Supabase CLI login role
+  // (a member of postgres), act as the role that owns the schema.
+  if (env.SUPABASE_DB_MIGRATION_ROLE) {
+    await sql.unsafe(`set role "${env.SUPABASE_DB_MIGRATION_ROLE.replaceAll('"', "")}"`);
+  }
+  const [{ current_database, owner }] = await sql`select current_database(), current_user as owner`;
+  console.log(`connected: db=${current_database} as ${owner}`);
+  await part1(sql, owner);
   await part2(sql);
 } finally {
   await sql.end();
