@@ -16,6 +16,11 @@ export type Database = {
     Tables: {
       audit_logs: {
         Row: {
+          actor_kind: string | null
+          actor_username: string | null
+          changes: Json | null
+          record_id: string | null
+          record_type: string | null
           action: string
           created_at: string
           description: string | null
@@ -25,6 +30,11 @@ export type Database = {
           user_id: string | null
         }
         Insert: {
+          actor_kind?: string | null
+          actor_username?: string | null
+          changes?: Json | null
+          record_id?: string | null
+          record_type?: string | null
           action: string
           created_at?: string
           description?: string | null
@@ -34,6 +44,11 @@ export type Database = {
           user_id?: string | null
         }
         Update: {
+          actor_kind?: string | null
+          actor_username?: string | null
+          changes?: Json | null
+          record_id?: string | null
+          record_type?: string | null
           action?: string
           created_at?: string
           description?: string | null
@@ -84,6 +99,12 @@ export type Database = {
       }
       documents: {
         Row: {
+          created_by: string | null
+          created_by_kind: string
+          created_by_name: string | null
+          updated_by: string | null
+          updated_by_kind: string
+          updated_by_name: string | null
           assigned_staff: string | null
           created_at: string
           document_date: string | null
@@ -113,6 +134,12 @@ export type Database = {
           uploaded_date: string | null
         }
         Insert: {
+          created_by?: string | null
+          created_by_kind?: string
+          created_by_name?: string | null
+          updated_by?: string | null
+          updated_by_kind?: string
+          updated_by_name?: string | null
           assigned_staff?: string | null
           created_at?: string
           document_date?: string | null
@@ -142,6 +169,12 @@ export type Database = {
           uploaded_date?: string | null
         }
         Update: {
+          created_by?: string | null
+          created_by_kind?: string
+          created_by_name?: string | null
+          updated_by?: string | null
+          updated_by_kind?: string
+          updated_by_name?: string | null
           assigned_staff?: string | null
           created_at?: string
           document_date?: string | null
@@ -182,6 +215,8 @@ export type Database = {
       }
       fax_attempts: {
         Row: {
+          created_by_kind: string
+          created_by_name: string | null
           attempt_number: number
           attempted_at: string
           confirmation_number: string | null
@@ -203,6 +238,8 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          created_by_kind?: string
+          created_by_name?: string | null
           attempt_number: number
           attempted_at?: string
           confirmation_number?: string | null
@@ -224,6 +261,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          created_by_kind?: string
+          created_by_name?: string | null
           attempt_number?: number
           attempted_at?: string
           confirmation_number?: string | null
@@ -300,6 +339,12 @@ export type Database = {
       }
       patients: {
         Row: {
+          created_by: string | null
+          created_by_kind: string
+          created_by_name: string | null
+          updated_by: string | null
+          updated_by_kind: string
+          updated_by_name: string | null
           address: string | null
           created_at: string
           date_of_birth: string | null
@@ -322,6 +367,12 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          created_by?: string | null
+          created_by_kind?: string
+          created_by_name?: string | null
+          updated_by?: string | null
+          updated_by_kind?: string
+          updated_by_name?: string | null
           address?: string | null
           created_at?: string
           date_of_birth?: string | null
@@ -344,6 +395,12 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          created_by?: string | null
+          created_by_kind?: string
+          created_by_name?: string | null
+          updated_by?: string | null
+          updated_by_kind?: string
+          updated_by_name?: string | null
           address?: string | null
           created_at?: string
           date_of_birth?: string | null
@@ -526,6 +583,65 @@ export type Database = {
           target_username: string
         }[]
       }
+      get_actor_status: {
+        Args: { _user_ids: string[] }
+        Returns: { account_removed: boolean; user_id: string }[]
+      }
+      get_audit_activity: {
+        Args: {
+          _action?: string | null
+          _actor_id?: string | null
+          _actor_kind?: string | null
+          _from?: string | null
+          _limit?: number
+          _offset?: number
+          _record_type?: string | null
+          _to?: string | null
+        }
+        Returns: {
+          action: string
+          actor_account_removed: boolean
+          actor_kind: string | null
+          actor_username: string | null
+          attempt_number: number | null
+          changes: Json | null
+          created_at: string
+          description: string | null
+          document_id: string | null
+          document_label: string | null
+          id: string
+          patient_code: string | null
+          patient_id: string | null
+          record_id: string | null
+          record_type: string | null
+          total_count: number
+          user_id: string | null
+        }[]
+      }
+      get_record_history: {
+        Args: {
+          _limit?: number
+          _offset?: number
+          _record_id: string
+          _record_type: string
+        }
+        Returns: {
+          action: string
+          actor_account_removed: boolean
+          actor_kind: string | null
+          actor_username: string | null
+          attempt_number: number | null
+          changes: Json | null
+          created_at: string
+          description: string | null
+          document_id: string | null
+          document_label: string | null
+          id: string
+          record_id: string | null
+          record_type: string | null
+          total_count: number
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -534,6 +650,15 @@ export type Database = {
         Returns: boolean
       }
       is_staff: { Args: { _user_id: string }; Returns: boolean }
+      list_audit_actors: {
+        Args: never
+        Returns: {
+          account_removed: boolean
+          role: string | null
+          user_id: string
+          username: string | null
+        }[]
+      }
     }
     Enums: {
       app_role: "admin" | "staff"

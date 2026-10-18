@@ -28,11 +28,12 @@ const env = Object.fromEntries(
 );
 
 const admin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 async function run() {
   const { data: pending, error: selectError } = await admin
     .from("patient_file_cleanup_queue")
-    .select("id, storage_path, attempts")
+    .select("id, storage_path, attempts, patient_ref")
     .is("done_at", null)
     .order("queued_at", { ascending: true })
     .limit(500);
@@ -81,6 +82,31 @@ async function run() {
   if (deleteError) {
     console.error("Storage removal succeeded but clearing the queue failed:", deleteError.message);
     process.exit(1);
+  }
+
+  // P3-P18: record the observed completion in the audit trail (system
+  // actor, no paths or file names), one event per deleted document so the
+  // surviving patient history -- or the admin log for a deleted patient --
+  // shows that queued attachment removal actually finished. Storage paths
+  // are "<patient uuid>/<document uuid>/<file>" (see UploadForm).
+  const groups = new Map();
+  for (const row of pending) {
+    const documentId = row.storage_path.split("/")[1];
+    const key = `${row.patient_ref}|${UUID_RE.test(documentId ?? "") ? documentId : ""}`;
+    groups.set(key, (groups.get(key) ?? 0) + 1);
+  }
+  for (const [key, count] of groups) {
+    const [patientId, documentId] = key.split("|");
+    const { error: auditError } = await admin.from("audit_logs").insert({
+      user_id: null,
+      patient_id: patientId,
+      document_id: documentId || null,
+      record_type: documentId ? "document" : "patient",
+      record_id: documentId || patientId,
+      action: "attachment_cleanup_completed",
+      description: `Removed ${count} attachment${count === 1 ? "" : "s"} from storage (retry)`,
+    });
+    if (auditError) console.error("Recording cleanup completion failed:", auditError.message);
   }
 
   console.log(`Cleaned up ${pending.length} attachment(s).`);
