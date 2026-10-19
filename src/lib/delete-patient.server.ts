@@ -5,6 +5,7 @@ import {
   type DeletePatientInput,
   type DeletePatientResult,
 } from "./delete-patient-core";
+import { recordCleanupOutcome, type CleanupAuditClient } from "./attachment-cleanup-audit";
 
 function isDeletePatientInput(data: unknown): data is DeletePatientInput {
   if (typeof data !== "object" || data === null) return false;
@@ -55,6 +56,12 @@ export const deletePatient = createServerFn({ method: "POST" })
         })
         .eq("patient_ref", result.patientId)
         .is("done_at", null);
+      await recordCleanupOutcome(
+        supabaseAdmin as unknown as CleanupAuditClient,
+        { patientId: result.patientId },
+        result.storagePaths.length,
+        "pending",
+      );
       return { ...result, filesPendingCleanup: result.storagePaths.length };
     }
 
@@ -62,6 +69,12 @@ export const deletePatient = createServerFn({ method: "POST" })
       .from("patient_file_cleanup_queue")
       .delete()
       .eq("patient_ref", result.patientId);
+    await recordCleanupOutcome(
+      supabaseAdmin as unknown as CleanupAuditClient,
+      { patientId: result.patientId },
+      result.storagePaths.length,
+      "completed",
+    );
 
     return { ...result, filesPendingCleanup: 0 };
   });

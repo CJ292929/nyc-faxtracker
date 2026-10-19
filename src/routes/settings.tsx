@@ -7,8 +7,7 @@ import { Workspace } from "@/components/workspace";
 import { Heading, Empty } from "@/components/common";
 import { Modal } from "@/components/forms";
 import { useApp } from "@/lib/app-context";
-import { supabase } from "@/integrations/supabase/client";
-import { dateTimeOf } from "@/lib/fax";
+import { ActivityLog } from "@/components/activity-log";
 import {
   createStaffOrAdminLogin,
   checkUsernameAvailable,
@@ -50,14 +49,6 @@ export const Route = createFileRoute("/settings")({
   }),
   component: Settings,
 });
-type AuditRow = {
-  id: string;
-  user_id: string | null;
-  action: string;
-  description: string | null;
-  created_at: string;
-};
-
 function RoleBadge({ role }: { role: "admin" | "staff" }) {
   const tone = role === "admin" ? "bg-gold/15 text-gold" : "bg-info/10 text-info";
   return (
@@ -630,8 +621,10 @@ function StaffAccessTable({
 }
 
 function Settings() {
-  const { user, role, patients } = useApp();
-  const [logs, setLogs] = useState<AuditRow[]>([]);
+  const { user, role } = useApp();
+  // Bumped after account actions that write audit events, so the activity
+  // log and its account filter re-query the server.
+  const [activityKey, setActivityKey] = useState(0);
   const [saving, setSaving] = useState("");
   const [accounts, setAccounts] = useState<AccountListRow[]>([]);
   const [sessionPasswords, setSessionPasswords] = useState<Record<string, string>>({});
@@ -650,12 +643,6 @@ function Settings() {
   useEffect(() => {
     if (role === "admin") {
       refreshAccounts();
-      void supabase
-        .from("audit_logs")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(100)
-        .then(({ data }) => setLogs(data ?? []));
     }
     // Session-only passwords never leave this component: they reset on
     // navigation away from Settings, sign-out (which unmounts this tree),
@@ -668,11 +655,13 @@ function Settings() {
   function handleCreated(username: string, password: string) {
     setSessionPasswords((m) => ({ ...m, [username]: password }));
     refreshAccounts();
+    setActivityKey((k) => k + 1);
   }
   function handlePasswordReset(username: string, password: string) {
     setSessionPasswords((m) => ({ ...m, [username]: password }));
     setRevealed((m) => ({ ...m, [username]: false }));
     setResetTarget(null);
+    setActivityKey((k) => k + 1);
   }
   function toggleReveal(username: string) {
     setRevealed((m) => ({ ...m, [username]: !m[username] }));
@@ -688,12 +677,7 @@ function Settings() {
       return rest;
     });
     setDeleteTarget(null);
-    void supabase
-      .from("audit_logs")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(100)
-      .then(({ data }) => setLogs(data ?? []));
+    setActivityKey((k) => k + 1);
   }
   async function confirmChangeRole() {
     if (!pendingChange) return;
@@ -709,12 +693,7 @@ function Settings() {
     setAccounts(
       accounts.map((a) => (a.user_id === target.user_id ? { ...a, role: result.newRole } : a)),
     );
-    void supabase
-      .from("audit_logs")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(100)
-      .then(({ data }) => setLogs(data ?? []));
+    setActivityKey((k) => k + 1);
     toast.success("Staff role updated.");
   }
   return (
@@ -772,52 +751,7 @@ function Settings() {
           </p>
         </section>
       )}
-      {role === "admin" && (
-        <section className="mt-8">
-          <h2 className="page-title mb-4 text-lg">Audit Activity</h2>
-          <div
-            className="table-wrap max-h-[360px] overflow-y-auto"
-            tabIndex={logs.length ? 0 : undefined}
-            role={logs.length ? "region" : undefined}
-            aria-label={logs.length ? "Audit activity log" : undefined}
-          >
-            {logs.length ? (
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Date & time</th>
-                    <th>User ID</th>
-                    <th>Action</th>
-                    <th>Patient</th>
-                    <th>Document</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {logs.map((l) => (
-                    <tr key={l.id}>
-                      <td>{dateTimeOf(l.created_at)}</td>
-                      <td>{l.user_id?.slice(0, 8) ?? "System"}</td>
-                      <td className="capitalize">
-                        {l.description ?? l.action.replaceAll("_", " ")}
-                      </td>
-                      <td>
-                        {patients.find(
-                          (p) => p.id === (l as AuditRow & { patient_id?: string }).patient_id,
-                        )?.patient_id ?? "—"}
-                      </td>
-                      <td>
-                        {(l as AuditRow & { document_id?: string }).document_id?.slice(0, 8) ?? "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <Empty text="No audit activity yet." />
-            )}
-          </div>
-        </section>
-      )}
+      {role === "admin" && <ActivityLog refreshKey={activityKey} />}
       <AlertDialog
         open={pendingChange !== null}
         onOpenChange={(open) => {

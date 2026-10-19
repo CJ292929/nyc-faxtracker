@@ -46,7 +46,10 @@
     "verify:p3p16-document-attempt-md-contact-live": "node scripts/p3p16-document-attempt-md-contact-live.mjs",
     "test:delete-document": "node --experimental-strip-types scripts/test-delete-document.mjs",
     "test:date-only-display": "node --experimental-strip-types scripts/test-date-only-display.mjs",
-    "verify:p3p17-delete-document-live": "node --experimental-strip-types scripts/p3p17-delete-document-live.mjs"
+    "verify:p3p17-delete-document-live": "node --experimental-strip-types scripts/p3p17-delete-document-live.mjs",
+    "test:audit-history": "node --experimental-strip-types scripts/test-audit-history.mjs",
+    "verify:p3p18-attribution-live": "node scripts/p3p18-attribution-live.mjs",
+    "verify:p3p18-ui-live": "node scripts/p3p18-ui-live.mjs"
   },
   "overrides": {
     "rolldown": "1.2.1"

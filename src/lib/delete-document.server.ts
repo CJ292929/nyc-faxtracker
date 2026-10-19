@@ -5,6 +5,7 @@ import {
   type DeleteDocumentInput,
   type DeleteDocumentResult,
 } from "./delete-document-core";
+import { recordCleanupOutcome, type CleanupAuditClient } from "./attachment-cleanup-audit";
 
 function isDeleteDocumentInput(data: unknown): data is DeleteDocumentInput {
   if (typeof data !== "object" || data === null) return false;
@@ -62,6 +63,12 @@ export const deleteDocumentAction = createServerFn({ method: "POST" })
         .eq("patient_ref", result.patientId)
         .in("storage_path", result.storagePaths)
         .is("done_at", null);
+      await recordCleanupOutcome(
+        supabaseAdmin as unknown as CleanupAuditClient,
+        { patientId: result.patientId, documentId: result.documentId },
+        result.storagePaths.length,
+        "pending",
+      );
       return { ...result, filesPendingCleanup: result.storagePaths.length };
     }
 
@@ -70,6 +77,12 @@ export const deleteDocumentAction = createServerFn({ method: "POST" })
       .delete()
       .eq("patient_ref", result.patientId)
       .in("storage_path", result.storagePaths);
+    await recordCleanupOutcome(
+      supabaseAdmin as unknown as CleanupAuditClient,
+      { patientId: result.patientId, documentId: result.documentId },
+      result.storagePaths.length,
+      "completed",
+    );
 
     return { ...result, filesPendingCleanup: 0 };
   });
