@@ -57,6 +57,7 @@
     "test:incoming-fax": "node --experimental-strip-types scripts/test-incoming-fax.mjs",
     "test:secondary-insurance": "node --experimental-strip-types scripts/test-secondary-insurance.mjs",
     "verify:p3p23-secondary-insurance-db": "supabase db query --linked -f scripts/p3p23-secondary-insurance-db.sql",
+    "verify:p3p23-ui-live": "node scripts/p3p23-ui-live.mjs",
     "verify:p3p21-incoming-fax-db": "node scripts/p3p21-incoming-fax-db.mjs",
     "verify:p3p21-ui-live": "node scripts/p3p21-ui-live.mjs"
   },
