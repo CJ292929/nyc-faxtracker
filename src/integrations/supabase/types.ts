@@ -107,6 +107,7 @@ export type Database = {
           updated_by_name: string | null
           assigned_staff: string | null
           created_at: string
+          direction: string
           document_date: string | null
           document_number: number | null
           document_type: string
@@ -142,6 +143,7 @@ export type Database = {
           updated_by_name?: string | null
           assigned_staff?: string | null
           created_at?: string
+          direction?: string
           document_date?: string | null
           document_number?: number | null
           document_type: string
@@ -177,6 +179,7 @@ export type Database = {
           updated_by_name?: string | null
           assigned_staff?: string | null
           created_at?: string
+          direction?: string
           document_date?: string | null
           document_number?: number | null
           document_type?: string

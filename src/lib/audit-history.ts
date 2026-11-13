@@ -79,6 +79,7 @@ const PATIENT_FIELDS: Record<string, string> = {
 
 const DOCUMENT_FIELDS: Record<string, string> = {
   document: "Document",
+  direction: "Direction",
   document_type: "Document type",
   document_number: "Document number",
   document_date: "Document date",
@@ -167,7 +168,16 @@ export const RECORD_TYPE_LABELS: Record<string, string> = {
   account: "Account",
 };
 
-export function actionLabel(event: Pick<HistoryEvent, "action" | "attempt_number">): string {
+// 0022 records an incoming fax's creation as documents_insert with this
+// description (the description survives permanent-deletion scrubbing).
+export const INCOMING_FAX_RECORDED = "Incoming fax recorded";
+
+export function actionLabel(
+  event: Pick<HistoryEvent, "action" | "attempt_number"> & { description?: string | null },
+): string {
+  if (event.action === "documents_insert" && event.description === INCOMING_FAX_RECORDED) {
+    return INCOMING_FAX_RECORDED;
+  }
   if (event.action === "fax_attempts_insert" && event.attempt_number) {
     return event.attempt_number > 1
       ? `Follow-up fax attempt #${event.attempt_number} recorded`
@@ -235,6 +245,9 @@ export function dateTimeWithZone(date?: string | null, timeZone?: string): strin
 export function formatValue(field: string, value: unknown, timeZone?: string): string {
   if (value === null || value === undefined || value === "") return "(blank)";
   if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (field === "direction" && typeof value === "string") {
+    return value === "incoming" ? "Incoming" : value === "outgoing" ? "Outgoing" : value;
+  }
   if (typeof value === "string" && DATE_ONLY_FIELDS.has(field)) {
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
     if (m) return `${MONTH_ABBR[Number(m[2]) - 1]} ${Number(m[3])}, ${m[1]}`;
