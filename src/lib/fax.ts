@@ -36,7 +36,10 @@ export const dateOnlyOf = (date?: string | null) => {
   const [, y, mo, d] = m as unknown as [string, string, string, string];
   return `${MONTH_ABBR[Number(mo) - 1]} ${Number(d)}, ${y}`;
 };
+// Incoming faxes (direction = 'incoming', 0022) were never sent, so they are
+// "Received" until uploaded -- never Awaiting Response / Failed / Pending.
 export const statusOf = (d: Document, attempts: Attempt[]) => {
+  if (d.direction === 'incoming') return d.uploaded ? 'Uploaded' : 'Received';
   if (d.uploaded) return 'Uploaded';
   if (d.received) return 'Awaiting Upload';
   const own = attempts.filter(a => a.document_id === d.id).sort((a,b)=>b.attempt_number-a.attempt_number);
