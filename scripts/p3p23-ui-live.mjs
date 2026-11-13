@@ -19,6 +19,13 @@
 // clearing, Received Fax patient picker finds the secondary Member ID, primary
 // insurance and Referring Provider details stay intact.
 //
+// --gaps (P3-P23R2) runs ONLY the three checks above did not cover: an older
+// nine-column template actually imported (mapped fields intact, secondary
+// NULL after reload); Record Received Fax from the patient profile saved and
+// reloaded (patient preselected, both secondary values in the card, incoming,
+// zero attempts); Edit Patient and View History on a phone with taps, long
+// values, internal scrolling, usable controls and no horizontal overflow.
+//
 // Env (file): P3P23_ENV_FILE or .env with SUPABASE_URL,
 // SUPABASE_SERVICE_ROLE_KEY, SUPABASE_PUBLISHABLE_KEY.
 // Local (default): SUPABASE_URL and E2E_BASE_URL must both be localhost.
@@ -26,7 +33,7 @@
 // Production (explicit opt-in, exact project + domain allowlist):
 //   P3P23_CONFIRM_PRODUCTION=synthetic-only P3P23_ENV_FILE=<file> \
 //   E2E_BASE_URL=https://faxtracker.vercel.app \
-//   node scripts/p3p23-ui-live.mjs --production [shot-dir]
+//   node scripts/p3p23-ui-live.mjs --production [--gaps] [shot-dir]
 import { mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { chromium, devices } from "playwright";
@@ -602,7 +609,400 @@ async function cleanup() {
   );
 }
 
+// ---- P3-P23R2 (--gaps): only the three checks not covered above ----------
+// Value under an exact field label inside the open dialog.
+const dialogValue = (page, label) =>
+  dialog(page).evaluate((root, l) => {
+    for (const el of root.querySelectorAll(".field-label")) {
+      if (el.textContent?.trim() === l) return el.nextElementSibling?.textContent?.trim() ?? null;
+    }
+    return null;
+  }, label);
+// Wait (no fixed sleep) until the main-content card shows the expected value;
+// on timeout return what it actually shows so a stale card is reported.
+async function waitForCard(page, label, expected) {
+  const ok = await page
+    .waitForFunction(
+      ([l, v]) =>
+        [...document.querySelectorAll("main .field-label")].some(
+          (el) => el.textContent?.trim() === l && el.nextElementSibling?.textContent?.trim() === v,
+        ),
+      [label, expected],
+      { timeout: 20000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  return ok ? expected : await cardValue(page, label);
+}
+const insertPatient = async (suffix, extra = {}) => {
+  const { data, error } = await admin
+    .from("patients")
+    .insert({
+      first_name: `G${tag}${suffix}`,
+      last_name: "Synthetic",
+      patient_id: `${tag}-${suffix}`,
+      insurance: "Medicare",
+      insurance_member_id: "0001234",
+      ...PROVIDER,
+      ...extra,
+    })
+    .select("*")
+    .single();
+  if (error) throw new Error(`insert patient ${suffix}: ${error.message}`);
+  patientIds.push(data.id);
+  return data;
+};
+
+// Gap 1: an older nine-column template is actually imported, not just accepted.
+async function legacyImportGap(page) {
+  const who = "staff (desktop) legacy import";
+  await open(page, "/patients");
+  const first = `L${tag}`;
+  const row = [
+    `${first} Synthetic Legacy`,
+    "000789",
+    "03/04/1950",
+    "212-555-0111",
+    "Medicare",
+    PROVIDER.referring_physician,
+    PROVIDER.referring_physician_npi,
+    PROVIDER.referring_physician_office_phone,
+    PROVIDER.referring_physician_fax,
+  ];
+  await uploadWorkbook(
+    page,
+    [
+      [
+        "Name",
+        "Member ID",
+        "DOB",
+        "Patient Phone",
+        "Insurance",
+        "Referring Provider",
+        "Referring Provider NPI",
+        "Referring Provider Office Number",
+        "Referring Provider Fax Number",
+      ],
+      row,
+    ],
+    "p3p23r2-legacy9.xlsx",
+  );
+  const review = dialog(page);
+  await review.getByRole("button", { name: "Import 1 Patient" }).waitFor({ timeout: 20000 });
+  await review.getByRole("button", { name: "Import 1 Patient" }).click();
+  await review.getByRole("button", { name: "Done" }).waitFor({ timeout: 30000 });
+  const { data: rows } = await admin.from("patients").select("*").eq("first_name", first);
+  for (const r of rows ?? []) patientIds.push(r.id);
+  const p = rows?.[0];
+  console.log(`   ${who}: imported patient id ${p?.id}`);
+  check(`${who}: exactly one patient created`, rows?.length === 1, rows);
+  check(
+    `${who}: original nine columns mapped intact`,
+    p?.last_name === "Synthetic Legacy" &&
+      p.insurance_member_id === "000789" &&
+      p.date_of_birth === "1950-03-04" &&
+      p.phone === "212-555-0111" &&
+      p.insurance === "Medicare" &&
+      Object.entries(PROVIDER).every(([k, v]) => p[k] === v),
+    p,
+  );
+  check(
+    `${who}: both secondary fields empty (NULL)`,
+    p?.secondary_insurance === null && p?.secondary_insurance_member_id === null,
+    p,
+  );
+  await review.getByRole("button", { name: "Done" }).click();
+  await page.locator('[role="dialog"]').waitFor({ state: "detached" });
+  await open(page, `/patients/${p.id}`);
+  await page.reload({ waitUntil: "networkidle" });
+  await settle(page).catch(() => {});
+  await page.locator("main .field-label").first().waitFor({ timeout: 20000 });
+  const shown = {};
+  for (const l of [
+    "Member ID",
+    "Patient Phone",
+    "Insurance",
+    SEC,
+    SEC_ID,
+    "Referring Provider NPI",
+  ])
+    shown[l] = await cardValue(page, l);
+  check(
+    `${who}: after reload card shows mapped fields and empty secondary`,
+    shown["Member ID"] === "000789" &&
+      shown["Patient Phone"] === "212-555-0111" &&
+      shown.Insurance === "Medicare" &&
+      shown["Referring Provider NPI"] === PROVIDER.referring_physician_npi &&
+      shown[SEC] === "Not specified" &&
+      shown[SEC_ID] === "Not specified",
+    shown,
+  );
+  const after = await patientRow(p.id);
+  check(
+    `${who}: row unchanged after reload`,
+    after.secondary_insurance === null && after.insurance_member_id === "000789",
+    after,
+  );
+}
+
+// Gap 2: Record Received Fax from the patient profile, saved (no file).
+async function profileIncomingGap(page) {
+  const who = "staff (desktop) profile received fax";
+  const pat = await insertPatient("rf", {
+    secondary_insurance: "Aetna Supplemental",
+    secondary_insurance_member_id: "00123-AB/4",
+  });
+  await open(page, `/patients/${pat.id}`);
+  await page.getByRole("button", { name: "Record Received Fax" }).click();
+  const d = dialog(page);
+  await d.getByText("Record received fax").waitFor();
+  check(
+    `${who}: patient preselected (no picker)`,
+    (await d.getByPlaceholder("Search by name, Patient ID or Member ID").count()) === 0 &&
+      (await dialogValue(page, "Name")) === `${pat.first_name} Synthetic`,
+  );
+  check(
+    `${who}: dialog card shows both secondary values`,
+    (await dialogValue(page, SEC)) === "Aetna Supplemental" &&
+      (await dialogValue(page, SEC_ID)) === "00123-AB/4",
+    { sec: await dialogValue(page, SEC), id: await dialogValue(page, SEC_ID) },
+  );
+  const sender = `Outside Ortho ${tag}`;
+  await d.locator('input[name="received_date"]').fill("2026-11-12T10:15");
+  await d.locator('input[name="received_from"]').fill(sender);
+  await d.locator('input[name="received_fax"]').fill("212-555-0142");
+  await d.getByRole("button", { name: "Save Received Fax" }).click();
+  await toast(page, "Received fax recorded.");
+  await page.locator('[role="dialog"]').waitFor({ state: "detached", timeout: 15000 });
+  const { data: docs } = await admin
+    .from("documents")
+    .select("id, patient_id, direction, received, received_from, recipient_name")
+    .eq("patient_id", pat.id);
+  for (const x of docs ?? []) docIds.push(x.id);
+  const doc = docs?.[0];
+  console.log(`   ${who}: document id ${doc?.id}`);
+  const { data: attempts } = await admin
+    .from("fax_attempts")
+    .select("id")
+    .eq("document_id", doc?.id ?? "00000000-0000-0000-0000-000000000000");
+  check(
+    `${who}: one incoming document for that patient, zero attempts`,
+    docs?.length === 1 &&
+      doc.patient_id === pat.id &&
+      doc.direction === "incoming" &&
+      doc.received === true &&
+      doc.received_from === sender &&
+      doc.recipient_name === null &&
+      attempts?.length === 0,
+    { docs, attempts },
+  );
+  await page.reload({ waitUntil: "networkidle" });
+  await settle(page).catch(() => {});
+  const listed = await page
+    .locator("main")
+    .getByText(sender)
+    .first()
+    .waitFor({ timeout: 20000 })
+    .then(() => true)
+    .catch(() => false);
+  check(`${who}: after reload the fax is listed on the patient's profile`, listed);
+  await open(page, `/documents/${doc.id}`);
+  await page.getByText("Created by").first().waitFor({ timeout: 20000 });
+  check(
+    `${who}: document page belongs to the patient, incoming, no attempt actions`,
+    (await cardValue(page, "Name")) === `${pat.first_name} Synthetic` &&
+      (await cardValue(page, SEC_ID)) === "00123-AB/4" &&
+      (await page.getByRole("button", { name: "Add Attempt" }).count()) === 0,
+  );
+}
+
+// Gap 3: Edit Patient + View History on a phone, with real taps.
+async function mobileDialogsGap(browser, acct) {
+  const who = "admin (phone) dialogs";
+  const pat = await insertPatient("mb");
+  const longIns = `Long Synthetic Supplemental Plan ${tag} ${"Q".repeat(90)}`.slice(0, 200);
+  const longMid = `00${tag}-${"7X".repeat(60)}`.slice(0, 100);
+  const { context, page } = await session(browser, acct, true);
+  const scroller = () => dialog(page).locator(":scope > div.overflow-y-auto");
+  const fits = async () => {
+    const vw = await page.evaluate(() => window.innerWidth);
+    const box = await dialog(page).boundingBox();
+    return {
+      page: await noHorizontalOverflow(page),
+      dialogInside: !!box && box.x >= 0 && box.x + box.width <= vw + 1,
+      body: await scroller().evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
+    };
+  };
+  const usable = async (loc) => {
+    await loc.scrollIntoViewIfNeeded();
+    const b = await loc.boundingBox();
+    const v = page.viewportSize();
+    return (
+      (await loc.isVisible()) &&
+      (await loc.isEnabled()) &&
+      !!b &&
+      b.x >= 0 &&
+      b.y >= 0 &&
+      b.x + b.width <= v.width + 1 &&
+      b.y + b.height <= v.height + 1
+    );
+  };
+  try {
+    await open(page, `/patients/${pat.id}`);
+    await page.getByRole("button", { name: "Edit Patient" }).tap();
+    await dialog(page).getByText("Edit patient").first().waitFor();
+    const before = await scroller().evaluate((el) => ({
+      top: el.scrollTop,
+      sh: el.scrollHeight,
+      ch: el.clientHeight,
+    }));
+    const ins = dialog(page).locator('[name="secondary_insurance"]');
+    const mid = dialog(page).locator('[name="secondary_insurance_member_id"]');
+    await ins.tap();
+    await ins.fill(longIns);
+    await mid.tap();
+    await mid.fill(longMid);
+    const after = await scroller().evaluate((el) => el.scrollTop);
+    check(
+      `${who}: Edit body scrolls internally to reach secondary fields`,
+      before.sh > before.ch && after > before.top,
+      { before, after },
+    );
+    check(
+      `${who}: Close and Cancel controls usable`,
+      (await usable(dialog(page).getByRole("button", { name: "Close", exact: true }))) &&
+        (await usable(dialog(page).getByRole("button", { name: "Cancel" }))),
+    );
+    const save = dialog(page).getByRole("button", { name: "Save Patient" });
+    check(`${who}: Save control usable`, await usable(save));
+    let f = await fits();
+    check(
+      `${who}: Edit dialog has no horizontal overflow (long values)`,
+      Object.values(f).every(Boolean),
+      f,
+    );
+    await page.screenshot({ path: path.join(SHOT_DIR, `${tag}-gap3-edit.png`) });
+    await save.tap();
+    await toast(page, "Patient updated.");
+    await page.locator('[role="dialog"]').waitFor({ state: "detached" });
+    const p = await patientRow(pat.id);
+    check(
+      `${who}: saved long values; primary unchanged`,
+      p.secondary_insurance === longIns &&
+        p.secondary_insurance_member_id === longMid &&
+        STABLE.every((k) => p[k] === pat[k]),
+      p,
+    );
+    const cardIns = await waitForCard(page, SEC, longIns);
+    const cardMid = await waitForCard(page, SEC_ID, longMid);
+    check(
+      `${who}: profile card shows saved values without reload`,
+      cardIns === longIns && cardMid === longMid,
+      {
+        cardIns,
+        cardMid,
+      },
+    );
+    check(
+      `${who}: profile has no horizontal overflow (long values)`,
+      await noHorizontalOverflow(page),
+    );
+
+    // Reopen Edit: the saved values are prefilled; Cancel by tap.
+    await page.getByRole("button", { name: "Edit Patient" }).tap();
+    await dialog(page).getByText("Edit patient").first().waitFor();
+    check(
+      `${who}: reopened Edit shows both saved values`,
+      (await ins.inputValue()) === longIns && (await mid.inputValue()) === longMid,
+    );
+    await dialog(page).getByRole("button", { name: "Cancel" }).tap();
+    await page.locator('[role="dialog"]').waitFor({ state: "detached" });
+
+    // View History.
+    await page.getByRole("button", { name: "View History" }).first().tap();
+    const hist = dialog(page);
+    const loaded = await hist
+      .getByText(longMid)
+      .first()
+      .waitFor({ timeout: 20000 })
+      .then(() => true)
+      .catch(() => false);
+    const h = (await hist.textContent()) ?? "";
+    check(
+      `${who}: View History shows labels, long values and actor`,
+      loaded &&
+        h.includes(SEC) &&
+        h.includes(SEC_ID) &&
+        h.includes(longIns) &&
+        h.includes(acct.username) &&
+        !/secondary_insurance/.test(h),
+      h.slice(0, 600),
+    );
+    const region = hist.getByRole("region", { name: "Record history" });
+    const r = await region.evaluate((el) => ({
+      overflowY: getComputedStyle(el).overflowY,
+      noX: el.scrollWidth <= el.clientWidth + 1,
+    }));
+    f = await fits();
+    check(
+      `${who}: History scrolls internally, no horizontal overflow`,
+      r.overflowY === "auto" && r.noX && Object.values(f).every(Boolean),
+      { r, f },
+    );
+    const close = hist.getByRole("button", { name: "Close", exact: true });
+    check(`${who}: History Close control usable`, await usable(close));
+    await page.screenshot({ path: path.join(SHOT_DIR, `${tag}-gap3-history.png`) });
+    await close.tap();
+    await page.locator('[role="dialog"]').waitFor({ state: "detached" });
+    const { data: logs } = await admin
+      .from("audit_logs")
+      .select("changes, actor_username")
+      .eq("patient_id", pat.id)
+      .eq("action", "patients_update");
+    check(
+      `${who}: one audit row with both fields by ${acct.username}`,
+      logs?.length === 1 &&
+        logs[0].actor_username === acct.username &&
+        Object.keys(logs[0].changes ?? {})
+          .sort()
+          .join() === "secondary_insurance,secondary_insurance_member_id",
+      logs,
+    );
+  } finally {
+    await context.close();
+  }
+}
+
+async function gapsRun(browser) {
+  const staff = await makeAccount("st", "staff");
+  const adm = await makeAccount("ad", "admin");
+  const { context, page } = await session(browser, staff, false);
+  try {
+    await legacyImportGap(page);
+    await profileIncomingGap(page);
+  } finally {
+    await context.close();
+  }
+  await mobileDialogsGap(browser, adm);
+  const real = problems.filter((p) => !/favicon/.test(p));
+  check("no unexpected console errors or failed requests", real.length === 0, real);
+}
+
 const browser = await chromium.launch();
+if (process.argv.includes("--gaps")) {
+  try {
+    await gapsRun(browser);
+  } finally {
+    await browser.close();
+    await cleanup();
+  }
+  if (failures) {
+    console.log(`\n${failures} check(s) failed`);
+    process.exit(1);
+  }
+  console.log("\nall P3-P23R2 gap checks passed (synthetic data removed)");
+  process.exit(0);
+}
 try {
   const staff = await makeAccount("st", "staff");
   const adm = await makeAccount("ad", "admin");
