@@ -233,7 +233,10 @@ const journal = JSON.parse(
 );
 check(
   "0022 journaled after 0021",
-  journal.entries.slice(-2).map((e) => e.tag),
+  (() => {
+    const i = journal.entries.findIndex((e) => e.tag === "0022_incoming_received_fax");
+    return journal.entries.slice(i - 1, i + 1).map((e) => e.tag);
+  })(),
   ["0021_document_type_other", "0022_incoming_received_fax"],
 );
 
