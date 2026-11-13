@@ -53,7 +53,10 @@
     "test:document-type-other": "node --experimental-strip-types scripts/test-document-type-other.mjs",
     "verify:p3p19-document-type-live": "node scripts/p3p19-document-type-live.mjs",
     "verify:p3p19-ui-live": "node scripts/p3p19-ui-live.mjs",
-    "verify:p3p20-patient-actions-layout-live": "node scripts/p3p20-patient-actions-layout-live.mjs"
+    "verify:p3p20-patient-actions-layout-live": "node scripts/p3p20-patient-actions-layout-live.mjs",
+    "test:incoming-fax": "node --experimental-strip-types scripts/test-incoming-fax.mjs",
+    "verify:p3p21-incoming-fax-db": "node scripts/p3p21-incoming-fax-db.mjs",
+    "verify:p3p21-ui-live": "node scripts/p3p21-ui-live.mjs"
   },
   "overrides": {
     "rolldown": "1.2.1"
