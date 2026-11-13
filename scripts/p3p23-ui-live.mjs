@@ -15,16 +15,26 @@
 // Also: anon and role-less REST writes are denied; no unexpected console
 // errors or failed requests.
 //
+// Also (P3-P23R): each secondary field blank independently, reopen Edit after
+// clearing, Received Fax patient picker finds the secondary Member ID, primary
+// insurance and Referring Provider details stay intact.
+//
 // Env (file): P3P23_ENV_FILE or .env with SUPABASE_URL,
 // SUPABASE_SERVICE_ROLE_KEY, SUPABASE_PUBLISHABLE_KEY.
-// Run with: E2E_BASE_URL=https://<deployment> node scripts/p3p23-ui-live.mjs [shot-dir]
+// Local (default): SUPABASE_URL and E2E_BASE_URL must both be localhost.
+//   E2E_BASE_URL=http://localhost:<port> node scripts/p3p23-ui-live.mjs [shot-dir]
+// Production (explicit opt-in, exact project + domain allowlist):
+//   P3P23_CONFIRM_PRODUCTION=synthetic-only P3P23_ENV_FILE=<file> \
+//   E2E_BASE_URL=https://faxtracker.vercel.app \
+//   node scripts/p3p23-ui-live.mjs --production [shot-dir]
 import { mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { chromium, devices } from "playwright";
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 
-const SHOT_DIR = process.argv[2] || ".";
+const PRODUCTION = process.argv.includes("--production");
+const SHOT_DIR = process.argv.slice(2).find((a) => !a.startsWith("--")) || ".";
 mkdirSync(SHOT_DIR, { recursive: true });
 const env = Object.fromEntries(
   readFileSync(process.env.P3P23_ENV_FILE || ".env", "utf8")
@@ -46,6 +56,25 @@ if (!BASE_URL) {
   console.error("Set E2E_BASE_URL to the deployment under test.");
   process.exit(1);
 }
+const isLocal = (u) => /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(u ?? "");
+const PROD_SUPABASE_URL = "https://iobrhrefxeirrmbnaiob.supabase.co";
+const PROD_DOMAINS = ["https://faxtracker.vercel.app", "https://faxtracker.nychomerehab.com"];
+if (PRODUCTION) {
+  if (
+    process.env.P3P23_CONFIRM_PRODUCTION !== "synthetic-only" ||
+    env.SUPABASE_URL !== PROD_SUPABASE_URL ||
+    !PROD_DOMAINS.includes(BASE_URL) ||
+    !env.SUPABASE_SERVICE_ROLE_KEY
+  ) {
+    console.error(
+      "Refusing Production run: need P3P23_CONFIRM_PRODUCTION=synthetic-only, the production SUPABASE_URL and an allowed E2E_BASE_URL.",
+    );
+    process.exit(2);
+  }
+} else if (!isLocal(env.SUPABASE_URL) || !isLocal(BASE_URL) || !env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.error("Refusing to run: SUPABASE_URL and E2E_BASE_URL must both be localhost.");
+  process.exit(2);
+}
 const admin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false },
 });
@@ -65,6 +94,23 @@ function check(name, cond, detail) {
 
 const accounts = [];
 const patientIds = [];
+const docIds = [];
+const PROVIDER = {
+  referring_physician: `Dr Synth ${tag}`,
+  referring_physician_npi: "1234567893",
+  referring_physician_office_phone: "212-555-0100",
+  referring_physician_fax: "212-555-0199",
+};
+// Fields no secondary-insurance edit may touch.
+const STABLE = [
+  "first_name",
+  "last_name",
+  "patient_id",
+  "insurance",
+  "insurance_member_id",
+  "status",
+  ...Object.keys(PROVIDER),
+];
 async function makeAccount(label, role) {
   const email = `synth-${tag}${label}@users.invalid`;
   const password = `Synth-${stamp}-${label}-pw!`;
@@ -166,7 +212,21 @@ async function actorFlow(browser, acct, mobile) {
     await d.locator('[name="insurance_member_id"]').fill("0001234");
     await d.locator('[name="secondary_insurance"]').fill("  Aetna Supplemental  ");
     await d.locator('[name="secondary_insurance_member_id"]').fill(" 00123-AB/4 ");
-    check(`${who}: Add Patient form shows both labels`, (await d.textContent()).includes(SEC_ID));
+    await d.locator('[name="referring_physician"]').fill(PROVIDER.referring_physician);
+    await d.locator('[name="referring_physician_npi"]').fill(PROVIDER.referring_physician_npi);
+    await d
+      .locator('[name="referring_physician_office_phone"]')
+      .fill(PROVIDER.referring_physician_office_phone);
+    await d.locator('[name="referring_physician_fax"]').fill(PROVIDER.referring_physician_fax);
+    const formText = await d.textContent();
+    check(
+      `${who}: Add Patient form shows both optional secondary labels`,
+      formText.includes(SEC) &&
+        formText.includes(SEC_ID) &&
+        (await d.locator('[name="secondary_insurance"]').getAttribute("required")) === null &&
+        (await d.locator('[name="secondary_insurance_member_id"]').getAttribute("required")) ===
+          null,
+    );
     if (mobile)
       check(
         `${who}: Add Patient form has no horizontal overflow`,
@@ -186,9 +246,11 @@ async function actorFlow(browser, acct, mobile) {
       created.secondary_insurance === "Aetna Supplemental" &&
         created.secondary_insurance_member_id === "00123-AB/4" &&
         created.insurance === "Medicare" &&
-        created.insurance_member_id === "0001234",
+        created.insurance_member_id === "0001234" &&
+        Object.entries(PROVIDER).every(([k, v]) => created[k] === v),
       created,
     );
+    const baseline = Object.fromEntries(STABLE.map((k) => [k, created[k]]));
     check(
       `${who}: create attributed to ${acct.username}`,
       created.created_by_name === acct.username,
@@ -200,6 +262,7 @@ async function actorFlow(browser, acct, mobile) {
       .insert({ patient_id: created.id, document_type: "Progress Note", status: "Draft" })
       .select("id")
       .single();
+    docIds.push(doc.id);
     await open(page, `/patients/${created.id}`);
     check(
       `${who}: patient page card shows both values`,
@@ -228,6 +291,32 @@ async function actorFlow(browser, acct, mobile) {
     check(`${who}: Patients search finds secondary Member ID`, (await row.count()) === 1);
     await page.getByPlaceholder("Search patient name...").fill("Aetna Supplemental");
     check(`${who}: Patients search finds secondary insurance`, (await row.count()) === 1);
+
+    // ---- Received Fax patient picker (Fax Tracker entry); Cancel writes nothing ----
+    await open(page, "/fax-tracker");
+    await page.getByRole("button", { name: "Record Received Fax" }).click();
+    await dialog(page)
+      .getByPlaceholder("Search by name, Patient ID or Member ID")
+      .fill("00123-ab/4");
+    const pick = dialog(page).locator("#incoming-patient-results button", {
+      hasText: `${tag}-${acct.role}`,
+    });
+    check(`${who}: Received Fax picker finds secondary Member ID`, (await pick.count()) === 1);
+    if (mobile)
+      check(
+        `${who}: Received Fax dialog has no horizontal overflow`,
+        await noHorizontalOverflow(page),
+      );
+    await dialog(page).getByRole("button", { name: "Cancel" }).click();
+    await page.locator('[role="dialog"]').waitFor({ state: "detached" });
+    check(
+      `${who}: Received Fax Cancel wrote nothing`,
+      ((await admin.from("documents").select("id").eq("patient_id", created.id)).data ?? [])
+        .length === 1,
+    );
+
+    await open(page, "/patients");
+    await page.getByPlaceholder("Search patient name...").fill("Aetna Supplemental");
     await row.getByTitle("Edit patient").click();
     const e = dialog(page);
     check(
@@ -244,15 +333,45 @@ async function actorFlow(browser, acct, mobile) {
       p,
     );
 
-    // ---- clear both, reload ----
+    // ---- each field blank independently, then clear both ----
     await open(page, `/patients/${created.id}`);
-    await page.getByRole("button", { name: "Edit Patient" }).click();
-    const c = dialog(page);
-    await c.locator('[name="secondary_insurance"]').fill("");
-    await c.locator('[name="secondary_insurance_member_id"]').fill("   ");
-    await c.getByRole("button", { name: "Save Patient" }).click();
-    await toast(page, "Patient updated.");
-    p = await patientRow(created.id);
+    const editOnProfile = async (ins, mid) => {
+      await page.getByRole("button", { name: "Edit Patient" }).click();
+      const c = dialog(page);
+      await c.locator('[name="secondary_insurance"]').fill(ins);
+      await c.locator('[name="secondary_insurance_member_id"]').fill(mid);
+      await c.getByRole("button", { name: "Save Patient" }).click();
+      await toast(page, "Patient updated.");
+      await page.locator('[role="dialog"]').waitFor({ state: "detached" });
+      return patientRow(created.id);
+    };
+    p = await editOnProfile("", "0007");
+    check(
+      `${who}: insurance blank, Member ID kept`,
+      p.secondary_insurance === null && p.secondary_insurance_member_id === "0007",
+      p,
+    );
+    // Record what the card shows the moment the dialog closes, then allow
+    // the shared data refresh up to 5s to settle (diagnoses a stale card).
+    const cardPair = async () => [await cardValue(page, SEC), await cardValue(page, SEC_ID)];
+    const immediate = await cardPair();
+    let settled = immediate;
+    for (let i = 0; i < 20 && settled.join("|") !== "Not specified|0007"; i++) {
+      await page.waitForTimeout(250);
+      settled = await cardPair();
+    }
+    console.log(`   ${who}: card right after save ${JSON.stringify(immediate)}`);
+    check(`${who}: card shows Not specified / 0007`, settled.join("|") === "Not specified|0007", {
+      immediate,
+      settled,
+    });
+    p = await editOnProfile(" Aetna Supplemental ", "");
+    check(
+      `${who}: Member ID blank, insurance kept`,
+      p.secondary_insurance === "Aetna Supplemental" && p.secondary_insurance_member_id === null,
+      p,
+    );
+    p = await editOnProfile("", "   ");
     check(
       `${who}: cleared fields stored as NULL`,
       p.secondary_insurance === null && p.secondary_insurance_member_id === null,
@@ -264,6 +383,25 @@ async function actorFlow(browser, acct, mobile) {
       `${who}: after reload, patient card shows "Not specified"`,
       (await cardValue(page, SEC)) === "Not specified" &&
         (await cardValue(page, SEC_ID)) === "Not specified",
+    );
+    await page.getByRole("button", { name: "Edit Patient" }).click();
+    const r = dialog(page);
+    check(
+      `${who}: reopened Edit shows blank secondary, primary prefilled`,
+      (await r.locator('[name="secondary_insurance"]').inputValue()) === "" &&
+        (await r.locator('[name="secondary_insurance_member_id"]').inputValue()) === "" &&
+        (await r.locator('[name="insurance"]').inputValue()) === "Medicare" &&
+        (await r.locator('[name="insurance_member_id"]').inputValue()) === "0001234" &&
+        (await r.locator('[name="referring_physician_npi"]').inputValue()) ===
+          PROVIDER.referring_physician_npi,
+    );
+    await r.getByRole("button", { name: "Cancel" }).click();
+    await page.locator('[role="dialog"]').waitFor({ state: "detached" });
+    p = await patientRow(created.id);
+    check(
+      `${who}: primary insurance, names, status and provider unchanged`,
+      STABLE.every((k) => p[k] === baseline[k]),
+      { baseline, now: Object.fromEntries(STABLE.map((k) => [k, p[k]])) },
     );
 
     // ---- View History ----
@@ -277,7 +415,12 @@ async function actorFlow(browser, acct, mobile) {
     const h = (await dialog(page).textContent()) ?? "";
     check(
       `${who}: View History shows both field labels and the actor`,
-      h.includes(SEC) && h.includes(SEC_ID) && h.includes(acct.username),
+      h.includes(SEC) &&
+        h.includes(SEC_ID) &&
+        h.includes(acct.username) &&
+        h.includes("Aetna Supplemental") &&
+        h.includes("0007") &&
+        !/secondary_insurance/.test(h),
       h.slice(0, 600),
     );
     await page.keyboard.press("Escape");
@@ -287,13 +430,18 @@ async function actorFlow(browser, acct, mobile) {
       .eq("patient_id", created.id)
       .eq("action", "patients_update")
       .order("created_at");
+    const keys = (l) =>
+      Object.keys(l.changes ?? {})
+        .sort()
+        .join();
     check(
-      `${who}: history rows = [Member ID edit, clear both] by ${acct.username}`,
-      logs.length === 2 &&
+      `${who}: history rows = [Member ID, insurance, both, insurance] by ${acct.username}`,
+      logs.length === 4 &&
         logs.every((l) => l.actor_username === acct.username) &&
-        JSON.stringify(Object.keys(logs[0].changes)) === '["secondary_insurance_member_id"]' &&
-        Object.keys(logs[1].changes).sort().join() ===
-          "secondary_insurance,secondary_insurance_member_id",
+        keys(logs[0]) === "secondary_insurance_member_id" &&
+        keys(logs[1]) === "secondary_insurance" &&
+        keys(logs[2]) === "secondary_insurance,secondary_insurance_member_id" &&
+        keys(logs[3]) === "secondary_insurance",
       logs,
     );
     await open(page, `/documents/${doc.id}`);
@@ -403,6 +551,7 @@ async function templateFlow(page, who) {
 }
 
 async function cleanup() {
+  if (docIds.length) await admin.from("documents").delete().in("id", docIds);
   for (const pid of patientIds) {
     await admin.from("documents").delete().eq("patient_id", pid);
     await admin.from("patients").delete().eq("id", pid);
@@ -427,10 +576,28 @@ async function cleanup() {
       : 0,
     logins: (await admin.from("user_logins").select("user_id").like("username", `${tag}%`)).data
       ?.length,
+    trackedPatients: patientIds.length
+      ? (await admin.from("patients").select("id").in("id", patientIds)).data?.length
+      : 0,
+    documents: (
+      await admin
+        .from("documents")
+        .select("id")
+        .in("id", docIds.length ? docIds : ["00000000-0000-0000-0000-000000000000"])
+    ).data?.length,
+    patientAudit: patientIds.length
+      ? (await admin.from("audit_logs").select("id").in("patient_id", patientIds)).data?.length
+      : 0,
+    users: (await Promise.all(accounts.map((a) => admin.auth.admin.getUserById(a.id)))).filter(
+      (u) => u.data?.user,
+    ).length,
   };
+  console.log(
+    `cleanup evidence: tracked ${patientIds.length} patients, ${docIds.length} documents, ${accounts.length} accounts; leftovers ${JSON.stringify(left)}`,
+  );
   check(
-    "cleanup: no synthetic patients, history or accounts remain",
-    !left.patients && !left.audit && !left.logins,
+    "cleanup: no synthetic patients, documents, history or accounts remain",
+    Object.values(left).every((n) => !n),
     left,
   );
 }
@@ -447,22 +614,18 @@ try {
   const pid = patientIds[0];
   const anonC = await apiClientFor(null);
   const nrC = await apiClientFor(nr);
-  const a1 = await anonC
-    .from("patients")
-    .insert({
-      first_name: "Anon",
-      last_name: tag,
-      patient_id: `${tag}-anon`,
-      secondary_insurance: "X",
-    });
-  const a2 = await nrC
-    .from("patients")
-    .insert({
-      first_name: "Roleless",
-      last_name: tag,
-      patient_id: `${tag}-nr`,
-      secondary_insurance: "X",
-    });
+  const a1 = await anonC.from("patients").insert({
+    first_name: "Anon",
+    last_name: tag,
+    patient_id: `${tag}-anon`,
+    secondary_insurance: "X",
+  });
+  const a2 = await nrC.from("patients").insert({
+    first_name: "Roleless",
+    last_name: tag,
+    patient_id: `${tag}-nr`,
+    secondary_insurance: "X",
+  });
   const a3 = await nrC
     .from("patients")
     .update({ secondary_insurance: "Roleless Edit" })
