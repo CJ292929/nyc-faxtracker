@@ -51,7 +51,8 @@
     "verify:p3p18-attribution-live": "node scripts/p3p18-attribution-live.mjs",
     "verify:p3p18-ui-live": "node scripts/p3p18-ui-live.mjs",
     "test:document-type-other": "node --experimental-strip-types scripts/test-document-type-other.mjs",
-    "verify:p3p19-document-type-live": "node scripts/p3p19-document-type-live.mjs"
+    "verify:p3p19-document-type-live": "node scripts/p3p19-document-type-live.mjs",
+    "verify:p3p19-ui-live": "node scripts/p3p19-ui-live.mjs"
   },
   "overrides": {
     "rolldown": "1.2.1"
