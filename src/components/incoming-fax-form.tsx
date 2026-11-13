@@ -231,10 +231,13 @@ export function IncomingFaxForm({
     if (!document && file) {
       const attachError = await attachFile(result.data, file);
       if (attachError) {
+        // No refresh() here: it swaps the page for "Loading records…", which
+        // would unmount this dialog and lose the retry step (and a second
+        // Save would then create a duplicate). The list refreshes when the
+        // retry step is finished or closed.
         setBusy(false);
         setSaved(result.data);
         setRetryFile(file);
-        await refresh();
         return;
       }
     }
@@ -267,9 +270,20 @@ export function IncomingFaxForm({
     await finish(saved.id, "Attachment uploaded.");
   }
 
+  async function finishWithoutAttachment() {
+    if (!saved || busy) return;
+    toast.message("Received fax saved without an attachment.");
+    await refresh();
+    onSaved?.(saved.id);
+    onClose();
+  }
+
   if (saved)
     return (
-      <Modal title="Received fax saved — attachment not uploaded" onClose={onClose}>
+      <Modal
+        title="Received fax saved — attachment not uploaded"
+        onClose={() => void finishWithoutAttachment()}
+      >
         <div className="space-y-5">
           <p className="text-sm">
             The received fax was saved, but the attachment did not upload. No file is attached yet.
@@ -299,11 +313,7 @@ export function IncomingFaxForm({
               type="button"
               variant="outline"
               disabled={busy}
-              onClick={async () => {
-                toast.message("Received fax saved without an attachment.");
-                onSaved?.(saved.id);
-                onClose();
-              }}
+              onClick={() => void finishWithoutAttachment()}
             >
               Finish without attachment
             </Button>
