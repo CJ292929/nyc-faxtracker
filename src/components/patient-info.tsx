@@ -20,5 +20,5 @@ export function PatientInfoCard({patient}:{patient:Patient|null|undefined}){
     ['Referring Provider Office Number',patient.referring_physician_office_phone,'tel'],
     ['Referring Provider Fax Number',patient.referring_physician_fax],
   ];
-  return <div className="grid gap-5 text-sm sm:grid-cols-2 lg:grid-cols-3">{fields.map(([label,value,kind])=><div key={label}><div className="field-label">{label}</div><div className="font-semibold">{value?kind==='tel'?<a href={`tel:${value.replace(/[^\d+]/g,'')}`} className="hover:underline">{value}</a>:value:'Not specified'}</div></div>)}</div>;
+  return <div className="grid gap-5 text-sm sm:grid-cols-2 lg:grid-cols-3">{fields.map(([label,value,kind])=><div key={label} className="min-w-0"><div className="field-label">{label}</div><div className="font-semibold [overflow-wrap:anywhere]">{value?kind==='tel'?<a href={`tel:${value.replace(/[^\d+]/g,'')}`} className="hover:underline">{value}</a>:value:'Not specified'}</div></div>)}</div>;
 }
