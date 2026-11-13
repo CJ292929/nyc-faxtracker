@@ -14,17 +14,50 @@
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_PUBLISHABLE_KEY,
 // E2E_BASE_URL (all localhost).
 //   node scripts/p3p22-provider-terminology-local.mjs [shot-dir]
+//
+// Explicit Production mode (synthetic-only): requires --production,
+// P3P22_CONFIRM_PRODUCTION=synthetic-only, P3P22_ENV_FILE (SUPABASE_URL must be
+// the iobrhrefxeirrmbnaiob project) and E2E_BASE_URL set to one of the two
+// production domains. Every account (@users.invalid), patient and document is
+// created by this run, and cleanup deletes only those ids plus their audit rows.
+//   P3P22_CONFIRM_PRODUCTION=synthetic-only P3P22_ENV_FILE=<file> \
+//   E2E_BASE_URL=https://faxtracker.vercel.app \
+//   node scripts/p3p22-provider-terminology-local.mjs --production [shot-dir]
 import { mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { chromium, devices } from "playwright";
 
-const SHOT_DIR = process.argv[2] || ".";
+const PRODUCTION = process.argv.includes("--production");
+const SHOT_DIR = process.argv.slice(2).find((a) => !a.startsWith("--")) || ".";
 mkdirSync(SHOT_DIR, { recursive: true });
-const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = process.env;
+const fileEnv = (file) =>
+  Object.fromEntries(
+    readFileSync(file, "utf8")
+      .split(/\r?\n/)
+      .filter((l) => l.includes("="))
+      .map((l) => [l.slice(0, l.indexOf("=")).trim(), l.slice(l.indexOf("=") + 1).trim()]),
+  );
+const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = PRODUCTION
+  ? fileEnv(process.env.P3P22_ENV_FILE ?? "")
+  : process.env;
 const BASE_URL = process.env.E2E_BASE_URL?.replace(/\/$/, "");
 const isLocal = (u) => /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(u ?? "");
-if (!isLocal(SUPABASE_URL) || !isLocal(BASE_URL) || !SUPABASE_SERVICE_ROLE_KEY) {
+const PROD_SUPABASE_URL = "https://iobrhrefxeirrmbnaiob.supabase.co";
+const PROD_DOMAINS = ["https://faxtracker.vercel.app", "https://faxtracker.nychomerehab.com"];
+if (PRODUCTION) {
+  if (
+    process.env.P3P22_CONFIRM_PRODUCTION !== "synthetic-only" ||
+    SUPABASE_URL !== PROD_SUPABASE_URL ||
+    !PROD_DOMAINS.includes(BASE_URL) ||
+    !SUPABASE_SERVICE_ROLE_KEY
+  ) {
+    console.error(
+      "Refusing Production run: need P3P22_CONFIRM_PRODUCTION=synthetic-only, the production SUPABASE_URL and an allowed E2E_BASE_URL.",
+    );
+    process.exit(2);
+  }
+} else if (!isLocal(SUPABASE_URL) || !isLocal(BASE_URL) || !SUPABASE_SERVICE_ROLE_KEY) {
   console.error("Refusing to run: SUPABASE_URL and E2E_BASE_URL must both be localhost.");
   process.exit(2);
 }
@@ -42,6 +75,8 @@ function check(name, ok, detail) {
 }
 const FORBIDDEN_LABELS = ["MD", "MD NPI", "MD Office Number", "MD Fax Number", "Document MD"];
 
+const accounts = [];
+const patientIds = [];
 async function makeAccount(label, role) {
   const email = `p3p22-${stamp}-${label}@users.invalid`;
   const password = `P3p22-${stamp}-${label}-pw!`;
@@ -51,6 +86,7 @@ async function makeAccount(label, role) {
     email_confirm: true,
   });
   if (error || !data.user) throw new Error(`create ${label}: ${error?.message}`);
+  accounts.push(data.user.id);
   const username = `p22${stamp}${label}`.slice(0, 32);
   await admin.from("user_logins").insert({ user_id: data.user.id, username });
   await admin.from("user_roles").insert({ user_id: data.user.id, role });
@@ -94,6 +130,28 @@ const mainText = (page) =>
     c.querySelectorAll("select, option").forEach((e) => e.remove());
     return c.innerText ?? c.textContent ?? "";
   });
+// Every visible form control and button in scope has an accessible name.
+const unnamedControls = (scope) =>
+  scope
+    .locator("input:visible, select:visible, textarea:visible, button:visible")
+    .evaluateAll((els) =>
+      els
+        .filter(
+          (e) =>
+            !(
+              e.labels?.length ||
+              e.getAttribute("aria-label") ||
+              e.getAttribute("aria-labelledby") ||
+              e.getAttribute("title") ||
+              (e.tagName === "BUTTON" && e.textContent?.trim())
+            ),
+        )
+        .map((e) => e.outerHTML.slice(0, 120)),
+    );
+async function checkNamed(name, scope) {
+  const unnamed = await unnamedControls(scope);
+  check(`${name}: all controls have accessible names`, unnamed.length === 0, unnamed);
+}
 const noOverflow = (page) =>
   page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
 const one = async (table, id) => (await admin.from(table).select("*").eq("id", id).single()).data;
@@ -142,15 +200,20 @@ async function actorFlow(browser, acct, mobile) {
     .select()
     .single();
   if (pe) throw new Error(`patient insert: ${pe.message}`);
+  patientIds.push(pat.id);
+  const customType = `P3P22 Custom Type ${stamp}`;
   const { data: otherDoc } = await admin
     .from("documents")
     .insert({
       patient_id: pat.id,
-      document_type: "Progress Note",
+      document_type: customType,
       recipient_type: "Referring MD",
       recipient_name: "Other Office",
       recipient_fax: "555-900-0000",
       md_name: `Dr. Other ${L}`,
+      md_npi: "3333333333",
+      md_office_phone: "555-900-0001",
+      md_fax: "555-900-0002",
     })
     .select()
     .single();
@@ -180,6 +243,7 @@ async function actorFlow(browser, acct, mobile) {
         !/\bReferring MD\b|"MD"/.test(helpText),
     );
     if (mobile) check(`${view} create dialog has no horizontal overflow`, await noOverflow(page));
+    await checkNamed(`${view} create dialog`, d);
     await page.screenshot({ path: path.join(SHOT_DIR, `${view}-create.png`), fullPage: true });
     await d.locator('input[name="recipient_name"]').fill(`Destination Office ${L}`);
     await d.locator('input[name="recipient_fax"]').fill("555-222-3333");
@@ -218,8 +282,14 @@ async function actorFlow(browser, acct, mobile) {
     const newProvider = `Dr. New Provider ${L}`;
     await d.locator('input[name="md_name"]').fill(newProvider);
     check(
-      `${view} edit: changing provider clears stale Provider NPI`,
-      (await d.locator('input[name="md_npi"]').inputValue()) === "",
+      `${view} edit: changing provider clears stale Provider NPI/Office/Fax`,
+      (await d.locator('input[name="md_npi"]').inputValue()) === "" &&
+        (await d.locator('input[name="md_office_phone"]').inputValue()) === "" &&
+        (await d.locator('input[name="md_fax"]').inputValue()) === "",
+    );
+    check(
+      `${view} edit: recipient fax field untouched by provider change`,
+      (await d.locator('input[name="recipient_fax"]').inputValue()) === "555-222-3333",
     );
     await d.locator('input[name="md_npi"]').fill("123");
     await d.getByRole("button", { name: "Save Fax Record" }).click();
@@ -232,6 +302,11 @@ async function actorFlow(browser, acct, mobile) {
     check(
       `${view} edit: provider saved on this document`,
       edited?.md_name === newProvider && edited?.md_npi === "2222222222",
+    );
+    check(
+      `${view} edit: deliberately cleared provider contact saved empty`,
+      !edited?.md_office_phone && !edited?.md_fax,
+      edited,
     );
     check(
       `${view} edit: recipient fax destination preserved`,
@@ -247,15 +322,66 @@ async function actorFlow(browser, acct, mobile) {
     check(
       `${view} edit: other document unchanged`,
       otherAfter?.md_name === otherDoc.md_name &&
+        otherAfter?.md_npi === otherDoc.md_npi &&
+        otherAfter?.md_fax === otherDoc.md_fax &&
         otherAfter?.recipient_fax === otherDoc.recipient_fax,
     );
 
-    // ---- Add Attempt ----
-    await page.reload({ waitUntil: "networkidle" });
+    // ---- Existing saved provider/contact + custom document type ----
+    await page.goto(`${BASE_URL}/documents/${otherDoc.id}`, { waitUntil: "networkidle" });
     await settle(page);
+    const otherText = await mainText(page);
+    const otherMissing = [
+      otherDoc.md_name,
+      "3333333333",
+      "555-900-0001",
+      "555-900-0002",
+      customType,
+      "Document Provider",
+    ].filter((s) => !otherText.includes(s));
+    check(
+      `${view} existing doc: saved provider contact + custom type render`,
+      otherMissing.length === 0,
+      otherMissing,
+    );
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    d = dialog(page);
+    check(
+      `${view} existing doc edit: custom type reconstructs as Other + text`,
+      (await d.locator('select[name="document_type"]').inputValue()) === "Other" &&
+        (await d.locator('input[name="document_type_other"]').inputValue()) === customType,
+    );
+    check(
+      `${view} existing doc edit: saved provider contact prefilled`,
+      (await d.locator('input[name="md_npi"]').inputValue()) === "3333333333" &&
+        (await d.locator('input[name="md_fax"]').inputValue()) === "555-900-0002",
+    );
+    await d.locator('textarea[name="notes"]').fill(`Unrelated note ${L}`);
+    await d.getByRole("button", { name: "Save Fax Record" }).click();
+    await toast(page, "Document updated.");
+    const otherSaved = await one("documents", otherDoc.id);
+    check(
+      `${view} unrelated edit: type, provider contact and recipient fax unchanged`,
+      otherSaved?.document_type === customType &&
+        otherSaved?.md_name === otherDoc.md_name &&
+        otherSaved?.md_npi === "3333333333" &&
+        otherSaved?.md_fax === "555-900-0002" &&
+        otherSaved?.recipient_fax === otherDoc.recipient_fax &&
+        otherSaved?.recipient_type === "Referring MD",
+      otherSaved,
+    );
+    check(
+      `${view} unrelated edit: edited doc unchanged`,
+      (await one("documents", created.id))?.md_name === newProvider,
+    );
+    await page.goto(`${BASE_URL}/documents/${created.id}`, { waitUntil: "networkidle" });
+    await settle(page);
+
+    // ---- Add Attempt ----
     await page.getByRole("button", { name: "Add Attempt" }).first().click();
     d = dialog(page);
     await checkProviderLabels(`${view} add attempt`, d);
+    await checkNamed(`${view} add attempt dialog`, d);
     await checkRecipientSelect(`${view} add attempt`, d, "Referring MD");
     check(
       `${view} add attempt: section heading is Recipient / Provider`,
@@ -314,6 +440,8 @@ async function actorFlow(browser, acct, mobile) {
     await page.getByTitle("Correct attempt").first().click();
     d = dialog(page);
     await checkProviderLabels(`${view} correct attempt`, d);
+    if (mobile) check(`${view} correct dialog has no horizontal overflow`, await noOverflow(page));
+    await checkNamed(`${view} correct dialog`, d);
     await checkRecipientSelect(`${view} correct attempt`, d, "Referring MD");
     const corrected = `Dr. Corrected ${L}`;
     await d.locator('input[name="md_name"]').fill(corrected);
@@ -380,10 +508,11 @@ async function actorFlow(browser, acct, mobile) {
     const headers = await page.locator("table.data-table th").allInnerTexts();
     check(
       `${view} Fax Tracker: Provider column`,
-      headers.map((h) => h.trim()).includes("Provider") &&
-        !headers.map((h) => h.trim()).includes("MD"),
+      headers.map((h) => h.trim().toLowerCase()).includes("provider") &&
+        !headers.map((h) => h.trim().toLowerCase()).includes("md"),
       headers,
     );
+    if (mobile) check(`${view} Fax Tracker has no horizontal overflow`, await noOverflow(page));
     await page.getByLabel("Provider", { exact: true }).fill(newProvider);
     await page.waitForTimeout(500);
     text = await mainText(page);
@@ -411,6 +540,14 @@ async function actorFlow(browser, acct, mobile) {
         (await d.locator('select[name="recipient_type"]').count()) === 0,
       inLabels,
     );
+    const inText = await d.innerText();
+    check(
+      `${view} incoming fax: Sender wording retained`,
+      /sender/i.test(inText) && !/referring md/i.test(inText),
+      inLabels,
+    );
+    if (mobile) check(`${view} incoming dialog has no horizontal overflow`, await noOverflow(page));
+    await checkNamed(`${view} incoming dialog`, d);
     await page.screenshot({ path: path.join(SHOT_DIR, `${view}-incoming.png`), fullPage: true });
     await d.getByRole("button", { name: "Cancel" }).click();
 
@@ -424,6 +561,15 @@ async function actorFlow(browser, acct, mobile) {
     const p = path.join(SHOT_DIR, `${view}-${dl.suggestedFilename()}`);
     await dl.saveAs(p);
     const header = readFileSync(p, "utf8").replace(/^﻿/, "").split(/\r?\n/)[0];
+    // Headings/labels only: real record values may legitimately contain "MD".
+    const reportHeadings = await page
+      .locator("main th, main h1, main h2, main h3, main .field-label, main label")
+      .allInnerTexts();
+    check(
+      `${view} Reports page: no MD headings or labels`,
+      !reportHeadings.some((h) => /\bMD\b|md_/.test(h)),
+      reportHeadings,
+    );
     check(
       `${view} Reports CSV: Provider column header`,
       /(^|,)"?Provider"?(,|$)/.test(header) && !/(^|,)"?MD"?(,|$)/.test(header),
@@ -432,6 +578,67 @@ async function actorFlow(browser, acct, mobile) {
   } finally {
     await context.close();
   }
+}
+
+// Scoped cleanup: only ids created by this run (never broad filters).
+async function cleanup() {
+  for (const pid of patientIds) {
+    const docIds = (
+      (await admin.from("documents").select("id").eq("patient_id", pid)).data ?? []
+    ).map((r) => r.id);
+    if (docIds.length) {
+      const attIds = (
+        (await admin.from("fax_attempts").select("id").in("document_id", docIds)).data ?? []
+      ).map((r) => r.id);
+      if (attIds.length)
+        await admin.from("fax_attempt_corrections").delete().in("attempt_id", attIds);
+      await admin.from("fax_attempts").delete().in("document_id", docIds);
+      await admin.from("document_files").delete().in("document_id", docIds);
+      await admin.from("documents").delete().in("id", docIds);
+      await admin.from("audit_logs").delete().in("document_id", docIds);
+    }
+    await admin.from("patients").delete().eq("id", pid);
+    await admin.from("audit_logs").delete().eq("patient_id", pid);
+  }
+  if (accounts.length) await admin.from("audit_logs").delete().in("user_id", accounts);
+  for (const id of accounts) {
+    await admin.from("user_roles").delete().eq("user_id", id);
+    await admin.from("user_logins").delete().eq("user_id", id);
+    await admin.auth.admin.deleteUser(id).catch(() => {});
+  }
+  const count = async (q) => (await q).data?.length ?? 0;
+  const anyP = patientIds.length > 0;
+  const anyA = accounts.length > 0;
+  const left = {
+    patients: anyP ? await count(admin.from("patients").select("id").in("id", patientIds)) : 0,
+    documents: anyP
+      ? await count(admin.from("documents").select("id").in("patient_id", patientIds))
+      : 0,
+    auditByPatient: anyP
+      ? await count(admin.from("audit_logs").select("id").in("patient_id", patientIds))
+      : 0,
+    auditByUser: anyA
+      ? await count(admin.from("audit_logs").select("id").in("user_id", accounts))
+      : 0,
+    logins: anyA
+      ? await count(admin.from("user_logins").select("user_id").in("user_id", accounts))
+      : 0,
+    roles: anyA
+      ? await count(admin.from("user_roles").select("user_id").in("user_id", accounts))
+      : 0,
+    authUsers: 0,
+  };
+  for (const id of accounts)
+    if ((await admin.auth.admin.getUserById(id)).data?.user) left.authUsers++;
+  console.log(
+    "cleanup evidence:",
+    JSON.stringify({ created: { accounts: accounts.length, patients: patientIds.length }, left }),
+  );
+  check(
+    "cleanup: no synthetic records, audit rows or accounts remain",
+    Object.values(left).every((v) => v === 0),
+    left,
+  );
 }
 
 const browser = await chromium.launch();
@@ -445,6 +652,7 @@ try {
   console.log("FAIL - flow aborted:", e.message);
 } finally {
   await browser.close();
+  await cleanup();
 }
 check("no unexpected console errors or failed requests", problems.length === 0, problems);
 console.log(failures ? `${failures} check(s) failed` : "all P3-P22 local browser checks passed");
