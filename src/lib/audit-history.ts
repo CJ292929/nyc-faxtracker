@@ -69,6 +69,8 @@ const PATIENT_FIELDS: Record<string, string> = {
   address: "Address",
   insurance: "Insurance",
   insurance_member_id: "Insurance member ID",
+  secondary_insurance: "Secondary / Supplemental Insurance",
+  secondary_insurance_member_id: "Secondary / Supplemental Insurance Member ID",
   referring_physician: "Referring Provider",
   referring_physician_npi: "Referring Provider NPI",
   referring_physician_office_phone: "Referring Provider Office Number",

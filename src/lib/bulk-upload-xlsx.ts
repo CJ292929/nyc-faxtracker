@@ -1,10 +1,14 @@
 import { TEMPLATE_HEADERS, MAX_FILE_BYTES, parseRows, type ParseResult } from "./bulk-upload";
+import { SECONDARY_MEMBER_ID_LABEL } from "./secondary-insurance.ts";
 
 export const TEMPLATE_FILENAME = "patient-bulk-upload-template.xlsx";
 
 // Columns that must round-trip as text (preserve leading zeros, "+1 ext."
 // formatting, etc.) rather than being auto-coerced to a number by Excel.
-const TEXT_FORMAT_COLUMNS = new Set([
+// Both Member ID columns are text so leading zeros/punctuation survive.
+export const TEXT_FORMAT_COLUMNS = new Set<number>([
+  TEMPLATE_HEADERS.indexOf("Member ID"),
+  TEMPLATE_HEADERS.indexOf(SECONDARY_MEMBER_ID_LABEL),
   TEMPLATE_HEADERS.indexOf("Referring Provider NPI"),
   TEMPLATE_HEADERS.indexOf("Referring Provider Office Number"),
   TEMPLATE_HEADERS.indexOf("Referring Provider Fax Number"),
@@ -22,16 +26,16 @@ export async function downloadPatientTemplate(): Promise<void> {
     ],
     ["3. DOB: date of birth in MM/DD/YYYY format. Optional, but recommended."],
     [
-      "4. Member ID, Patient Phone, Insurance, Referring Provider, Referring Provider NPI, Referring Provider Office Number, and Referring Provider Fax Number are all optional.",
+      "4. Member ID, Patient Phone, Insurance, Referring Provider, Referring Provider NPI, Referring Provider Office Number, Referring Provider Fax Number, Secondary / Supplemental Insurance, and Secondary / Supplemental Insurance Member ID are all optional. The two secondary insurance columns are independent of each other.",
     ],
     [
       "5. Referring Provider NPI, if provided, must be exactly 10 digits. Leave it blank if unknown — do not guess.",
     ],
     [
-      '6. Referring Provider NPI, Referring Provider Office Number, and Referring Provider Fax Number are formatted as text in this template to preserve leading zeros and formatting (e.g. extensions) — keep that "Text" cell format when filling them in.',
+      '6. Member ID, Secondary / Supplemental Insurance Member ID, Referring Provider NPI, Referring Provider Office Number, and Referring Provider Fax Number are formatted as text in this template to preserve leading zeros and formatting (e.g. extensions) — keep that "Text" cell format when filling them in.',
     ],
     [
-      "7. A previously downloaded six-column template (Name, Member ID, DOB, Phone, Insurance, Referring MD) or nine-column \"Referring MD\" template is also accepted on upload; the six-column template's Phone column is treated as Patient Phone.",
+      "7. A previously downloaded nine-column template (\"Referring Provider\" or \"Referring MD\" headers, without secondary insurance) or six-column template (Name, Member ID, DOB, Phone, Insurance, Referring MD) is also accepted on upload; the six-column template's Phone column is treated as Patient Phone.",
     ],
     ["8. Do not put real patient data in this blank template — only in your completed copy."],
     ['9. Save as .xlsx and upload it on the Patients tab using "Bulk Upload Patients".'],

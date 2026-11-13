@@ -366,6 +366,8 @@ export type Database = {
           referring_physician_fax: string | null
           referring_physician_npi: string | null
           referring_physician_office_phone: string | null
+          secondary_insurance: string | null
+          secondary_insurance_member_id: string | null
           status: string
           updated_at: string
         }
@@ -394,6 +396,8 @@ export type Database = {
           referring_physician_fax?: string | null
           referring_physician_npi?: string | null
           referring_physician_office_phone?: string | null
+          secondary_insurance?: string | null
+          secondary_insurance_member_id?: string | null
           status?: string
           updated_at?: string
         }
@@ -422,6 +426,8 @@ export type Database = {
           referring_physician_fax?: string | null
           referring_physician_npi?: string | null
           referring_physician_office_phone?: string | null
+          secondary_insurance?: string | null
+          secondary_insurance_member_id?: string | null
           status?: string
           updated_at?: string
         }

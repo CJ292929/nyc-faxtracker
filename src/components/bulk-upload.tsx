@@ -9,11 +9,14 @@ import { canManagePatients } from "@/lib/fax";
 import {
   TEMPLATE_HEADERS,
   LEGACY_TEMPLATE_HEADERS,
+  PROVIDER_TEMPLATE_HEADERS,
+  IMPORTED_PATIENT_COLUMNS,
   assignPatientIds,
+  importedRowMatches,
   markDuplicatesAgainstExisting,
-  normField,
   type BulkRow,
 } from "@/lib/bulk-upload";
+import { SECONDARY_INSURANCE_LABEL, SECONDARY_MEMBER_ID_LABEL } from "@/lib/secondary-insurance";
 import { parseUploadedFile } from "@/lib/bulk-upload-xlsx";
 
 type Outcome = "created" | "skipped" | "failed" | "conflict";
@@ -90,9 +93,7 @@ export function BulkUploadModal({ onClose }: { onClose: () => void }) {
     const patientId = row.patientId;
     const { data, error } = await supabase
       .from("patients")
-      .select(
-        "first_name, last_name, date_of_birth, phone, insurance, insurance_member_id, referring_physician, referring_physician_npi, referring_physician_office_phone, referring_physician_fax",
-      )
+      .select(IMPORTED_PATIENT_COLUMNS)
       .eq("patient_id", patientId)
       .maybeSingle();
     if (error) {
@@ -105,22 +106,10 @@ export function BulkUploadModal({ onClose }: { onClose: () => void }) {
         detail: `${reason} Not yet created — retry will reuse Patient ID ${patientId}.`,
       };
     }
-    // Every mapped imported field must match the existing row (consistent
-    // trim+lowercase normalization) before treating it as the same import --
-    // a differing field is a conflict, never an overwrite.
-    const fieldsMatch =
-      normField(data.first_name) === normField(row.first_name) &&
-      normField(data.last_name) === normField(row.last_name) &&
-      (data.date_of_birth ?? "") === (row.date_of_birth ?? "") &&
-      normField(data.phone) === normField(row.phone) &&
-      normField(data.insurance) === normField(row.insurance) &&
-      normField(data.insurance_member_id) === normField(row.member_id) &&
-      normField(data.referring_physician) === normField(row.referring_physician) &&
-      normField(data.referring_physician_npi) === normField(row.referring_physician_npi) &&
-      normField(data.referring_physician_office_phone) ===
-        normField(row.referring_physician_office_phone) &&
-      normField(data.referring_physician_fax) === normField(row.referring_physician_fax);
-    if (fieldsMatch) {
+    // Every mapped imported field (including secondary insurance) must match
+    // the existing row before treating it as the same import -- a differing
+    // field is a conflict, never an overwrite.
+    if (importedRowMatches(data, row)) {
       return { row, outcome: "created", detail: "Verified as already created", patientId };
     }
     return {
@@ -144,6 +133,8 @@ export function BulkUploadModal({ onClose }: { onClose: () => void }) {
       referring_physician_npi: row.referring_physician_npi || null,
       referring_physician_office_phone: row.referring_physician_office_phone || null,
       referring_physician_fax: row.referring_physician_fax || null,
+      secondary_insurance: row.secondary_insurance || null,
+      secondary_insurance_member_id: row.secondary_insurance_member_id || null,
     });
     if (!error) return { row, outcome: "created", detail: "Imported", patientId };
     // status 0 / empty code means the client never got a real server
@@ -206,7 +197,8 @@ export function BulkUploadModal({ onClose }: { onClose: () => void }) {
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
             Upload a completed copy of the patient bulk-upload template (.xlsx). Expected columns,
-            in order: <strong>{TEMPLATE_HEADERS.join(" | ")}</strong>. A previously downloaded
+            in order: <strong>{TEMPLATE_HEADERS.join(" | ")}</strong>. A previously downloaded{" "}
+            {PROVIDER_TEMPLATE_HEADERS.length}-column template (no secondary insurance) or
             six-column template (<strong>{LEGACY_TEMPLATE_HEADERS.join(" | ")}</strong>) is also
             accepted — its Phone column is treated as Patient Phone.
           </p>
@@ -274,6 +266,8 @@ export function BulkUploadModal({ onClose }: { onClose: () => void }) {
                   <th>Referring Provider NPI</th>
                   <th>Referring Provider Office Number</th>
                   <th>Referring Provider Fax Number</th>
+                  <th>{SECONDARY_INSURANCE_LABEL}</th>
+                  <th>{SECONDARY_MEMBER_ID_LABEL}</th>
                   <th>Flags</th>
                 </tr>
               </thead>
@@ -298,6 +292,8 @@ export function BulkUploadModal({ onClose }: { onClose: () => void }) {
                     <td>{r.referring_physician_npi || "—"}</td>
                     <td>{r.referring_physician_office_phone || "—"}</td>
                     <td>{r.referring_physician_fax || "—"}</td>
+                    <td>{r.secondary_insurance || "—"}</td>
+                    <td>{r.secondary_insurance_member_id || "—"}</td>
                     <td className="text-xs">
                       {r.errors.map((e) => (
                         <div key={e} className="flex items-center gap-1 text-destructive">

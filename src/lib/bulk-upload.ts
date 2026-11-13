@@ -1,5 +1,30 @@
 import type { Patient } from "./fax";
+import {
+  SECONDARY_INSURANCE_LABEL,
+  SECONDARY_INSURANCE_MAX_LENGTH,
+  SECONDARY_MEMBER_ID_LABEL,
+  SECONDARY_MEMBER_ID_MAX_LENGTH,
+} from "./secondary-insurance.ts";
+// The current eleven-column template (P3-P23). The two optional Secondary /
+// Supplemental Insurance columns are appended at the end, so every earlier
+// column keeps the same position as in all older templates.
 export const TEMPLATE_HEADERS = [
+  "Name",
+  "Member ID",
+  "DOB",
+  "Patient Phone",
+  "Insurance",
+  "Referring Provider",
+  "Referring Provider NPI",
+  "Referring Provider Office Number",
+  "Referring Provider Fax Number",
+  SECONDARY_INSURANCE_LABEL,
+  SECONDARY_MEMBER_ID_LABEL,
+] as const;
+// The nine-column "Referring Provider" template downloaded between P3-P17
+// and P3-P23. Still accepted on upload; it has no secondary insurance
+// columns, so those are left empty for every row -- never invented.
+export const PROVIDER_TEMPLATE_HEADERS = [
   "Name",
   "Member ID",
   "DOB",
@@ -13,8 +38,8 @@ export const TEMPLATE_HEADERS = [
 // The nine-column template downloaded between P3-P15 and P3-P16 (before the
 // "Referring MD" -> "Referring Provider" label rename in P3-P17). Still
 // accepted on upload with identical column positions/semantics to the
-// current template -- only the header wording changed, not the data this
-// template collects, so these rows parse exactly like `current`.
+// "Referring Provider" nine-column template -- only the header wording
+// changed -- so these rows parse exactly like `legacy_provider9`.
 export const LEGACY_MD_TEMPLATE_HEADERS = [
   "Name",
   "Member ID",
@@ -49,6 +74,8 @@ const MAX_LEN = {
   npi: 10,
   office_phone: 50,
   fax: 50,
+  secondary_insurance: SECONDARY_INSURANCE_MAX_LENGTH,
+  secondary_member_id: SECONDARY_MEMBER_ID_MAX_LENGTH,
 } as const;
 
 export type BulkRow = {
@@ -65,6 +92,8 @@ export type BulkRow = {
   referring_physician_npi: string;
   referring_physician_office_phone: string;
   referring_physician_fax: string;
+  secondary_insurance: string;
+  secondary_insurance_member_id: string;
   errors: string[];
   duplicateInFile: boolean;
   duplicateExisting: { id: string; patient_id: string; name: string } | null;
@@ -91,73 +120,63 @@ function headersMatch(found: string[], expected: readonly string[]): boolean {
   );
 }
 
+export type TemplateKind = "current" | "legacy_provider9" | "legacy_md9" | "legacy";
+
+// Every explicitly supported header shape, newest first. Order matters only
+// for error reporting: among same-length shapes, the first one with the most
+// matching columns is the one a mismatch is reported against.
+const TEMPLATE_SHAPES: { kind: TemplateKind; headers: readonly string[] }[] = [
+  { kind: "current", headers: TEMPLATE_HEADERS },
+  { kind: "legacy_provider9", headers: PROVIDER_TEMPLATE_HEADERS },
+  { kind: "legacy_md9", headers: LEGACY_MD_TEMPLATE_HEADERS },
+  { kind: "legacy", headers: LEGACY_TEMPLATE_HEADERS },
+];
+
 /**
- * Detects which of the three explicitly supported template shapes a header
- * row matches: the current nine-column template ("Referring Provider..."),
- * the nine-column "Referring MD..." template downloaded before the P3-P17
- * label rename (parses identically to current), or the oldest legacy
- * six-column template. Returns null (with errors describing the mismatch)
- * for anything else -- malformed headers are rejected clearly rather than
- * guessed at.
+ * Detects which supported template shape a header row matches: the current
+ * eleven-column template (with Secondary / Supplemental Insurance), the
+ * nine-column "Referring Provider..." template, the nine-column
+ * "Referring MD..." template (parses identically to the former), or the
+ * oldest six-column template. Returns null (with errors describing the
+ * mismatch) for anything else -- malformed headers are rejected clearly
+ * rather than guessed at.
  */
 export function detectTemplate(
   headerRow: unknown[],
-): { kind: "current" | "legacy_md9" | "legacy"; errors: [] } | { kind: null; errors: string[] } {
+): { kind: TemplateKind; errors: [] } | { kind: null; errors: string[] } {
   const filledCount = countFilled(headerRow);
-  const asCurrent = TEMPLATE_HEADERS.map((_, i) => cell(headerRow, i));
-  const asLegacyMd9 = LEGACY_MD_TEMPLATE_HEADERS.map((_, i) => cell(headerRow, i));
-  const asLegacy = LEGACY_TEMPLATE_HEADERS.map((_, i) => cell(headerRow, i));
-  if (filledCount === TEMPLATE_HEADERS.length && headersMatch(asCurrent, TEMPLATE_HEADERS)) {
-    return { kind: "current", errors: [] };
-  }
-  if (
-    filledCount === LEGACY_MD_TEMPLATE_HEADERS.length &&
-    headersMatch(asLegacyMd9, LEGACY_MD_TEMPLATE_HEADERS)
-  ) {
-    return { kind: "legacy_md9", errors: [] };
-  }
-  if (filledCount === LEGACY_TEMPLATE_HEADERS.length && headersMatch(asLegacy, LEGACY_TEMPLATE_HEADERS)) {
-    return { kind: "legacy", errors: [] };
+  const sameLength = TEMPLATE_SHAPES.filter((shape) => shape.headers.length === filledCount);
+  for (const shape of sameLength) {
+    const found = shape.headers.map((_, i) => cell(headerRow, i));
+    if (headersMatch(found, shape.headers)) return { kind: shape.kind, errors: [] };
   }
   const errors: string[] = [];
-  if (filledCount === LEGACY_TEMPLATE_HEADERS.length) {
-    LEGACY_TEMPLATE_HEADERS.forEach((expected, i) => {
-      if ((asLegacy[i] ?? "").toLowerCase() !== expected.toLowerCase()) {
-        errors.push(`Column ${i + 1} must be "${expected}" (found "${asLegacy[i] ?? ""}").`);
-      }
+  if (sameLength.length) {
+    const scored = sameLength.map((shape) => {
+      const found = shape.headers.map((_, i) => cell(headerRow, i));
+      const matches = shape.headers.filter(
+        (expected, i) => (found[i] ?? "").toLowerCase() === expected.toLowerCase(),
+      ).length;
+      return { shape, found, matches };
     });
-    return { kind: null, errors };
-  }
-  if (filledCount === TEMPLATE_HEADERS.length) {
-    // Both nine-column shapes have the same length; prefer reporting
-    // against whichever one has more matching columns so the error
-    // message points at the closer mismatch.
-    const currentMatches = TEMPLATE_HEADERS.filter(
-      (expected, i) => (asCurrent[i] ?? "").toLowerCase() === expected.toLowerCase(),
-    ).length;
-    const legacyMd9Matches = LEGACY_MD_TEMPLATE_HEADERS.filter(
-      (expected, i) => (asLegacyMd9[i] ?? "").toLowerCase() === expected.toLowerCase(),
-    ).length;
-    const useLegacyMd9 = legacyMd9Matches > currentMatches;
-    const expectedHeaders = useLegacyMd9 ? LEGACY_MD_TEMPLATE_HEADERS : TEMPLATE_HEADERS;
-    const found = useLegacyMd9 ? asLegacyMd9 : asCurrent;
-    expectedHeaders.forEach((expected, i) => {
-      if ((found[i] ?? "").toLowerCase() !== expected.toLowerCase()) {
-        errors.push(`Column ${i + 1} must be "${expected}" (found "${found[i] ?? ""}").`);
+    const closest = scored.reduce((best, next) => (next.matches > best.matches ? next : best));
+    closest.shape.headers.forEach((expected, i) => {
+      if ((closest.found[i] ?? "").toLowerCase() !== expected.toLowerCase()) {
+        errors.push(`Column ${i + 1} must be "${expected}" (found "${closest.found[i] ?? ""}").`);
       }
     });
     return { kind: null, errors };
   }
   errors.push(
-    `Expected ${TEMPLATE_HEADERS.length} columns (${TEMPLATE_HEADERS.join(" | ")}) or the legacy ${
-      LEGACY_TEMPLATE_HEADERS.length
-    }-column template (${LEGACY_TEMPLATE_HEADERS.join(" | ")}), found ${filledCount}.`,
+    `Expected ${TEMPLATE_HEADERS.length} columns (${TEMPLATE_HEADERS.join(" | ")}), or a previously downloaded ${
+      PROVIDER_TEMPLATE_HEADERS.length
+    }- or ${LEGACY_TEMPLATE_HEADERS.length}-column template, found ${filledCount}.`,
   );
   return { kind: null, errors };
 }
 
 /** @deprecated kept for existing callers/tests; validates against the
- * current nine-column template only. Use detectTemplate for upload parsing,
+ * current template only. Use detectTemplate for upload parsing,
  * which also accepts the legacy six-column template. */
 export function validateHeaders(headerRow: unknown[]): string[] {
   const found = TEMPLATE_HEADERS.map((_, i) => cell(headerRow, i));
@@ -224,10 +243,10 @@ export function parseRows(aoa: unknown[][]): ParseResult {
   const detected = detectTemplate(header);
   if (detected.kind === null) return { fileErrors: detected.errors, rows: [] };
   // Only the oldest six-column template lacks NPI/Office/Fax columns
-  // entirely; the "legacy_md9" shape (old "Referring MD..." headers) has
-  // all nine columns in the same positions as `current` and parses
-  // identically.
+  // entirely; both nine-column shapes have them in the same positions as
+  // `current`. Only `current` has the two secondary insurance columns.
   const isLegacy = detected.kind === "legacy";
+  const hasSecondary = detected.kind === "current";
   const dataRows = aoa
     .slice(1)
     .map((r, i) => ({ r, sheetRow: i + 2 }))
@@ -253,6 +272,9 @@ export function parseRows(aoa: unknown[][]): ParseResult {
     const npi = isLegacy ? "" : cell(r, 6);
     const officePhone = isLegacy ? "" : cell(r, 7);
     const fax = isLegacy ? "" : cell(r, 8);
+    // Older templates never carry secondary insurance -- left empty.
+    const secondaryInsurance = hasSecondary ? cell(r, 9) : "";
+    const secondaryMemberId = hasSecondary ? cell(r, 10) : "";
     if (!rawName) errors.push("Name is required.");
     const { first, last, error: nameError } = splitName(rawName);
     if (nameError) errors.push(nameError);
@@ -269,6 +291,14 @@ export function parseRows(aoa: unknown[][]): ParseResult {
     if (officePhone.length > MAX_LEN.office_phone)
       errors.push(`Referring Provider Office Number exceeds ${MAX_LEN.office_phone} characters.`);
     if (fax.length > MAX_LEN.fax) errors.push(`Referring Provider Fax Number exceeds ${MAX_LEN.fax} characters.`);
+    if (secondaryInsurance.length > MAX_LEN.secondary_insurance)
+      errors.push(
+        `${SECONDARY_INSURANCE_LABEL} exceeds ${MAX_LEN.secondary_insurance} characters.`,
+      );
+    if (secondaryMemberId.length > MAX_LEN.secondary_member_id)
+      errors.push(
+        `${SECONDARY_MEMBER_ID_LABEL} exceeds ${MAX_LEN.secondary_member_id} characters.`,
+      );
     const { iso: dob, error: dobError } = parseDob(dobRaw);
     if (dobError) errors.push(dobError);
     return {
@@ -285,6 +315,8 @@ export function parseRows(aoa: unknown[][]): ParseResult {
       referring_physician_npi: npi,
       referring_physician_office_phone: officePhone,
       referring_physician_fax: fax,
+      secondary_insurance: secondaryInsurance,
+      secondary_insurance_member_id: secondaryMemberId,
       errors,
       duplicateInFile: false,
       duplicateExisting: null,
@@ -305,6 +337,8 @@ export function normField(v: string | null | undefined): string {
   return (v ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+// Duplicate detection uses the primary Member ID and name + DOB only. The
+// secondary Member ID is never treated as a patient identifier.
 function markDuplicatesInFile(rows: BulkRow[]): void {
   const byMember = new Map<string, number[]>();
   const byName = new Map<string, number[]>();
@@ -354,6 +388,51 @@ export function markDuplicatesAgainstExisting(rows: BulkRow[], existing: Patient
         name: `${match.first_name} ${match.last_name}`,
       };
   }
+}
+
+/** The patient columns an import writes, as read back for reconciliation. */
+export type ImportedPatientFields = Pick<
+  Patient,
+  | "first_name"
+  | "last_name"
+  | "date_of_birth"
+  | "phone"
+  | "insurance"
+  | "insurance_member_id"
+  | "referring_physician"
+  | "referring_physician_npi"
+  | "referring_physician_office_phone"
+  | "referring_physician_fax"
+  | "secondary_insurance"
+  | "secondary_insurance_member_id"
+>;
+export const IMPORTED_PATIENT_COLUMNS =
+  "first_name, last_name, date_of_birth, phone, insurance, insurance_member_id, referring_physician, referring_physician_npi, referring_physician_office_phone, referring_physician_fax, secondary_insurance, secondary_insurance_member_id";
+
+/**
+ * Retry reconciliation: true only when every imported field of an existing
+ * row equals this upload row (consistent trim + lowercase normalization,
+ * blank == null). Any difference -- including secondary insurance -- means
+ * a different patient occupies the Patient ID, which is a conflict and
+ * never an overwrite.
+ */
+export function importedRowMatches(existing: ImportedPatientFields, row: BulkRow): boolean {
+  return (
+    normField(existing.first_name) === normField(row.first_name) &&
+    normField(existing.last_name) === normField(row.last_name) &&
+    (existing.date_of_birth ?? "") === (row.date_of_birth ?? "") &&
+    normField(existing.phone) === normField(row.phone) &&
+    normField(existing.insurance) === normField(row.insurance) &&
+    normField(existing.insurance_member_id) === normField(row.member_id) &&
+    normField(existing.referring_physician) === normField(row.referring_physician) &&
+    normField(existing.referring_physician_npi) === normField(row.referring_physician_npi) &&
+    normField(existing.referring_physician_office_phone) ===
+      normField(row.referring_physician_office_phone) &&
+    normField(existing.referring_physician_fax) === normField(row.referring_physician_fax) &&
+    normField(existing.secondary_insurance) === normField(row.secondary_insurance) &&
+    normField(existing.secondary_insurance_member_id) ===
+      normField(row.secondary_insurance_member_id)
+  );
 }
 
 export function generatePatientId(taken: Set<string>): string {

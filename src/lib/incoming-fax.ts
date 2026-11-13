@@ -158,12 +158,13 @@ export function matchesPatientQuery(
     last_name: string;
     patient_id: string;
     insurance_member_id?: string | null;
+    secondary_insurance_member_id?: string | null;
   },
   query: string,
 ) {
   const q = query.trim().toLowerCase();
   if (!q) return true;
   const hay =
-    `${p.first_name} ${p.last_name} ${p.last_name}, ${p.first_name} ${p.patient_id} ${p.insurance_member_id ?? ""}`.toLowerCase();
+    `${p.first_name} ${p.last_name} ${p.last_name}, ${p.first_name} ${p.patient_id} ${p.insurance_member_id ?? ""} ${p.secondary_insurance_member_id ?? ""}`.toLowerCase();
   return q.split(/\s+/).every((part) => hay.includes(part));
 }
