@@ -49,7 +49,9 @@
     "verify:p3p17-delete-document-live": "node --experimental-strip-types scripts/p3p17-delete-document-live.mjs",
     "test:audit-history": "node --experimental-strip-types scripts/test-audit-history.mjs",
     "verify:p3p18-attribution-live": "node scripts/p3p18-attribution-live.mjs",
-    "verify:p3p18-ui-live": "node scripts/p3p18-ui-live.mjs"
+    "verify:p3p18-ui-live": "node scripts/p3p18-ui-live.mjs",
+    "test:document-type-other": "node --experimental-strip-types scripts/test-document-type-other.mjs",
+    "verify:p3p19-document-type-live": "node scripts/p3p19-document-type-live.mjs"
   },
   "overrides": {
     "rolldown": "1.2.1"
