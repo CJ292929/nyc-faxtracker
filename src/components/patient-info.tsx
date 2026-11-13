@@ -1,4 +1,5 @@
 import { dateOnlyOf, nameOf, type Patient } from '@/lib/fax';
+import { SECONDARY_INSURANCE_LABEL, SECONDARY_MEMBER_ID_LABEL } from '@/lib/secondary-insurance';
 // Single shared rendering of the required patient identity fields plus
 // Referring Provider contact details, used on both the patient detail page
 // and the document detail page's Patient Information card, so the two
@@ -15,6 +16,8 @@ export function PatientInfoCard({patient}:{patient:Patient|null|undefined}){
     ['DOB',patient.date_of_birth?dateOnlyOf(patient.date_of_birth):null],
     ['Patient Phone',patient.phone,'tel'],
     ['Insurance',patient.insurance],
+    [SECONDARY_INSURANCE_LABEL,patient.secondary_insurance],
+    [SECONDARY_MEMBER_ID_LABEL,patient.secondary_insurance_member_id],
     ['Referring Provider',patient.referring_physician],
     ['Referring Provider NPI',patient.referring_physician_npi],
     ['Referring Provider Office Number',patient.referring_physician_office_phone,'tel'],
