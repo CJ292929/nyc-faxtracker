@@ -1,0 +1,7 @@
+{
+  "git": {
+    "deploymentEnabled": {
+      "feat/p3-p22-provider-terminology": false
+    }
+  }
+}

@@ -114,7 +114,7 @@ export function buildIncomingFaxPayload(
     };
 
   const npi = clean(input.mdNpi);
-  if (npi && !NPI_RE.test(npi)) return { ok: false, error: "MD NPI must be exactly 10 digits." };
+  if (npi && !NPI_RE.test(npi)) return { ok: false, error: "Provider NPI must be exactly 10 digits." };
 
   const numberRaw = clean(input.documentNumber);
   let documentNumber: number | null = null;

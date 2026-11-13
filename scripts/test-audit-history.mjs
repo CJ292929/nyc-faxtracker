@@ -56,7 +56,15 @@ check(
   fieldLabel("patient", "referring_physician_fax"),
   "Referring Provider Fax Number",
 );
-check("document MD label", fieldLabel("document", "md_name"), "Document MD");
+check("document Provider label", fieldLabel("document", "md_name"), "Document Provider");
+check("document Provider NPI label", fieldLabel("document", "md_npi"), "Document Provider NPI");
+check("attempt Provider label", fieldLabel("fax_attempt", "md_name"), "Provider");
+check("attempt Provider Fax label", fieldLabel("fax_attempt", "md_fax"), "Provider Fax Number");
+check("raw md_name key is never the label", fieldLabel("fax_attempt", "md_name") === "md_name", false);
+check("stored Referring MD recipient shows as Referring Provider", formatValue("recipient_type", "Referring MD"), "Referring Provider");
+check("other recipient types display as stored", formatValue("recipient_type", "Insurance"), "Insurance");
+check("unknown legacy recipient type is not rewritten", formatValue("recipient_type", "Clinic"), "Clinic");
+check("Referring MD inside another field is untouched", formatValue("notes", "Referring MD called"), "Referring MD called");
 check(
   "attempt notes label differs from document notes",
   fieldLabel("fax_attempt", "notes"),

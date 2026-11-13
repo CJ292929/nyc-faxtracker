@@ -96,7 +96,7 @@ function friendlyError(message: string): string {
   if (message.startsWith("REASON_REQUIRED")) return "A correction reason is required.";
   if (message.startsWith("FAILURE_REASON_REQUIRED"))
     return "A failure reason is required for Failed status.";
-  if (message.startsWith("MD_NPI_INVALID")) return "MD NPI must be exactly 10 digits.";
+  if (message.startsWith("MD_NPI_INVALID")) return "Provider NPI must be exactly 10 digits.";
   if (message.startsWith("NOT_FOUND")) return "That fax attempt no longer exists.";
   if (message.startsWith("CONFLICT"))
     return "This attempt was updated by someone else. Reload and try again.";
@@ -120,7 +120,7 @@ export async function correctFaxAttempt(
     return { ok: false, error: "A failure reason is required for Failed status." };
   }
   if (data.mdNpi.trim() && !/^\d{10}$/.test(data.mdNpi.trim())) {
-    return { ok: false, error: "MD NPI must be exactly 10 digits." };
+    return { ok: false, error: "Provider NPI must be exactly 10 digits." };
   }
 
   const { data: rows, error } = await client.rpc("correct_fax_attempt", {

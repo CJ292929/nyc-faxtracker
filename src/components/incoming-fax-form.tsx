@@ -424,14 +424,14 @@ export function IncomingFaxForm({
             <MdContactFields
               key={patient?.id ?? "none"}
               mdField={{
-                label: "MD",
+                label: "Provider",
                 name: "md_name",
-                placeholder: "Doctor this document is for",
+                placeholder: "Provider this document is for",
                 suggestions: mdOptions,
               }}
-              npiField={{ label: "MD NPI", name: "md_npi" }}
-              officePhoneField={{ label: "MD Office Number", name: "md_office_phone" }}
-              faxField={{ label: "MD Fax Number", name: "md_fax" }}
+              npiField={{ label: "Provider NPI", name: "md_npi" }}
+              officePhoneField={{ label: "Provider Office Number", name: "md_office_phone" }}
+              faxField={{ label: "Provider Fax Number", name: "md_fax" }}
               mdValue={document ? document.md_name : patient?.referring_physician}
               npiValue={document ? document.md_npi : patient?.referring_physician_npi}
               officePhoneValue={

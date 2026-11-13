@@ -126,7 +126,7 @@ async function run() {
     await check(
       "non-10-digit MD NPI rejected without a call",
       await correctFaxAttempt({ ...baseInput, mdNpi: "42" }, client),
-      { ok: false, error: "MD NPI must be exactly 10 digits." },
+      { ok: false, error: "Provider NPI must be exactly 10 digits." },
     );
     await check("no rpc call made for invalid MD NPI", called, false);
   }
@@ -140,7 +140,7 @@ async function run() {
     await check(
       "server-side MD NPI rejection mapped to friendly error",
       await correctFaxAttempt(baseInput, client),
-      { ok: false, error: "MD NPI must be exactly 10 digits." },
+      { ok: false, error: "Provider NPI must be exactly 10 digits." },
     );
   }
 
