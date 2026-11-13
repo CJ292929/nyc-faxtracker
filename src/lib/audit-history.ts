@@ -10,6 +10,8 @@
 export const LEGACY_UNKNOWN = "Unknown — recorded before tracking.";
 export const SYSTEM_ACTOR = "System / maintenance";
 
+import { recipientTypeLabel } from "./recipient-type.ts";
+
 export type AttributionKind = "user" | "system" | "unknown";
 export type HistoryRecordType = "patient" | "document";
 
@@ -86,10 +88,10 @@ const DOCUMENT_FIELDS: Record<string, string> = {
   recipient_type: "Recipient",
   recipient_name: "Recipient name",
   recipient_fax: "Recipient fax number",
-  md_name: "Document MD",
-  md_npi: "Document MD NPI",
-  md_office_phone: "Document MD Office Number",
-  md_fax: "Document MD Fax Number",
+  md_name: "Document Provider",
+  md_npi: "Document Provider NPI",
+  md_office_phone: "Document Provider Office Number",
+  md_fax: "Document Provider Fax Number",
   notes: "Notes",
   status: "Status",
   received: "Received?",
@@ -112,10 +114,10 @@ const ATTEMPT_FIELDS: Record<string, string> = {
   failure_reason: "Failure reason",
   confirmation_number: "Confirmation / reference number",
   notes: "Fax notes",
-  md_name: "MD",
-  md_npi: "MD NPI",
-  md_office_phone: "MD Office Number",
-  md_fax: "MD Fax Number",
+  md_name: "Provider",
+  md_npi: "Provider NPI",
+  md_office_phone: "Provider Office Number",
+  md_fax: "Provider Fax Number",
   recipient_type: "Recipient",
   recipient_name: "Recipient name",
   recipient_fax: "Recipient fax number",
@@ -248,6 +250,7 @@ export function formatValue(field: string, value: unknown, timeZone?: string): s
   if (field === "direction" && typeof value === "string") {
     return value === "incoming" ? "Incoming" : value === "outgoing" ? "Outgoing" : value;
   }
+  if (field === "recipient_type" && typeof value === "string") return recipientTypeLabel(value);
   if (typeof value === "string" && DATE_ONLY_FIELDS.has(field)) {
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
     if (m) return `${MONTH_ABBR[Number(m[2]) - 1]} ${Number(m[3])}, ${m[1]}`;
