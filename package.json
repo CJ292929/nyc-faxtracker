@@ -60,6 +60,7 @@
     "verify:p3p23-ui-live": "node scripts/p3p23-ui-live.mjs",
     "test:janeapp-confirmation": "node --experimental-strip-types scripts/test-janeapp-confirmation.mjs",
     "verify:p3p24-janeapp-confirmation-db": "supabase db query --linked -f scripts/p3p24-janeapp-confirmation-db.sql",
+    "verify:p3p24-ui-live": "node scripts/p3p24-ui-live.mjs",
     "verify:p3p21-incoming-fax-db": "node scripts/p3p21-incoming-fax-db.mjs",
     "verify:p3p21-ui-live": "node scripts/p3p21-ui-live.mjs"
   },
