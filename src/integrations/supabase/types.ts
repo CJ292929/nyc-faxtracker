@@ -113,6 +113,7 @@ export type Database = {
           document_type: string
           id: string
           is_demo: boolean
+          janeapp_uploaded: boolean | null
           md_fax: string | null
           md_name: string | null
           md_npi: string | null
@@ -149,6 +150,7 @@ export type Database = {
           document_type: string
           id?: string
           is_demo?: boolean
+          janeapp_uploaded?: boolean | null
           md_fax?: string | null
           md_name?: string | null
           md_npi?: string | null
@@ -185,6 +187,7 @@ export type Database = {
           document_type?: string
           id?: string
           is_demo?: boolean
+          janeapp_uploaded?: boolean | null
           md_fax?: string | null
           md_name?: string | null
           md_npi?: string | null
