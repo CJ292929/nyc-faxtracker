@@ -11,6 +11,7 @@ export const LEGACY_UNKNOWN = "Unknown — recorded before tracking.";
 export const SYSTEM_ACTOR = "System / maintenance";
 
 import { recipientTypeLabel } from "./recipient-type.ts";
+import { janeAppChoiceOf } from "./janeapp.ts";
 
 export type AttributionKind = "user" | "system" | "unknown";
 export type HistoryRecordType = "patient" | "document";
@@ -104,6 +105,7 @@ const DOCUMENT_FIELDS: Record<string, string> = {
   received_notes: "Received notes",
   uploaded: "Uploaded to patient system?",
   uploaded_date: "Date uploaded",
+  janeapp_uploaded: "Uploaded to JaneApp?",
   patient_id: "Patient",
   assigned_staff: "Assigned staff",
   is_demo: "Demo record",
@@ -247,6 +249,7 @@ export function dateTimeWithZone(date?: string | null, timeZone?: string): strin
 }
 
 export function formatValue(field: string, value: unknown, timeZone?: string): string {
+  if (field === "janeapp_uploaded") return janeAppChoiceOf(typeof value === "boolean" ? value : null);
   if (value === null || value === undefined || value === "") return "(blank)";
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (field === "direction" && typeof value === "string") {

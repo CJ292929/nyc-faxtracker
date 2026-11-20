@@ -169,6 +169,13 @@
       "when": 1791700000000,
       "tag": "0023_add_secondary_insurance",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791800000000,
+      "tag": "0024_add_janeapp_upload_confirmation",
+      "breakpoints": true
     }
   ]
 }
