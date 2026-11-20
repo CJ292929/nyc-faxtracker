@@ -26,6 +26,23 @@ Migrations under `drizzle/migrations` additionally read `SUPABASE_DB_MIGRATION_U
 `drizzle.config.ts`). See the initial-admin provisioning note below before
 applying migrations.
 
+The Drizzle runner decides what is applied only by comparing each journal
+entry's `when` with the newest `created_at` in `drizzle.__drizzle_migrations`;
+it never re-checks stored hashes. Never edit an applied migration file.
+
+**Process exception — 0024 (`0024_add_janeapp_upload_confirmation`).** It was
+applied to the linked project (`iobrhrefxeirrmbnaiob`) with
+`supabase db query --linked` instead of `drizzle-kit migrate`: the committed SQL
+plus a ledger insert in one transaction (`hash` =
+`447db3f888c7e2087056a29dfd374e4c2601111c7ac2525554d81f2fb2f5435b`, the
+sha256 of the committed LF file; `created_at` = `1791800000000`, the journal
+`when`). Reviewed in P3-P24R: the ledger has 25 rows (0000–0024) and every
+`created_at` equals its journal `when`. The column is `boolean`, nullable, no
+default, with the expected comment. Replaying this ledger on a disposable
+Postgres, `drizzle-kit migrate` applied nothing, and a throwaway 0025 was the
+only migration run. Rows 0014 and 0021 hold hashes of CRLF working copies, an
+older harmless difference; the runner ignores hashes.
+
 Set all of the above (except `SUPABASE_DB_MIGRATION_URL`, which is a local/CI-only
 migration credential) as Vercel Project → Settings → Environment Variables. Do not
 put `SUPABASE_SERVICE_ROLE_KEY` in a `VITE_`-prefixed variable or in any value that
